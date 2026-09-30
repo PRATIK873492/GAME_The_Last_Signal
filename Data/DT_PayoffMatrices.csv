@@ -1,0 +1,5 @@
+---,GameName,Action0Label,Action1Label,Explanation,CC_Player,CC_AI,CD_Player,CD_AI,DC_Player,DC_AI,DD_Player,DD_AI
+PD_OneShot,"Prisoner's Dilemma","Send Full Shipment","Send Fake Shipment","Defecting pays more whatever the other side does, so in a single meeting both sides defect - even though both cooperating would pay more.",3,3,0,5,5,0,1,1
+PD_Repeated,"Repeated Prisoner's Dilemma","Honour the Deal","Skim the Shipment","When you will meet again, today's betrayal costs you tomorrow's cooperation - the shadow of the future makes cooperation rational.",3,3,0,5,5,0,1,1
+Chicken,"Game of Chicken","Swerve","Stay","Two stable outcomes exist - one side swerves, the other stays. Reputation decides who blinks; both staying is a disaster.",3,3,1,5,5,1,0,0
+StagHunt,"Stag Hunt","Go for the Core","Grab Supplies","Hunting the stag together pays most (payoff-dominant), but grabbing the hare is safe whatever your partner does (risk-dominant).",5,5,0,3,3,0,3,3

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Last Signal 3D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Stencil+Display:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/src/ui/styles.css">
+</head>
+<body>
+<canvas id="view"></canvas>
+<canvas id="lens"></canvas>
+
+<div id="hud" hidden>
+  <div id="hud-tl"><div id="district">Lakeside</div><div id="clock">07:00</div></div>
+  <div id="hud-tr"><div class="eyebrow">Trust</div><div id="trust"></div></div>
+  <div id="objective">—</div>
+  <canvas id="minimap" width="200" height="200"></canvas>
+  <div id="crosshair"></div>
+  <div id="fps" hidden></div>
+</div>
+
+<div id="start" class="overlay">
+  <div class="inner">
+    <div class="eyebrow">Solace City · 2041 · 3D preview (Phases 1–4)</div>
+    <h1>The Last <span>Signal</span></h1>
+    <p id="load-msg" class="mono">Loading physics…</p>
+    <div class="row">
+      <label for="preset" class="mono">Graphics</label>
+      <select id="preset">
+        <option value="low">Low</option><option value="medium">Medium</option>
+        <option value="high">High</option><option value="ultra">Ultra</option>
+      </select>
+      <button class="btn" id="play" disabled>Click to play</button>
+      <a class="btn ghost" href="../index.html" style="text-decoration:none;text-align:center">Back to the main game</a>
+    </div>
+    <fieldset class="fx">
+      <legend class="mono">Effects</legend>
+      <label><input type="checkbox" id="fx-ao"> Ambient occlusion</label>
+      <label><input type="checkbox" id="fx-bloom"> Bloom</label>
+      <label><input type="checkbox" id="fx-godrays"> God rays</label>
+      <label><input type="checkbox" id="fx-ssr"> Wet reflections (High+)</label>
+      <label><input type="checkbox" id="fx-dof"> Depth of field</label>
+      <label><input type="checkbox" id="fx-motion"> Motion blur</label>
+      <label><input type="checkbox" id="fx-grain"> Film grain &amp; vignette</label>
+      <span class="mono hint">Low preset turns all effects off.</span>
+    </fieldset>
+    <div class="keys">
+      <kbd>W A S D</kbd><span>Move (relative to the camera)</span>
+      <kbd>Mouse</kbd><span>Look around</span>
+      <kbd>Right mouse</kbd><span>Aim (camera zooms over the shoulder)</span>
+      <kbd>Shift</kbd><span>Sprint</span>
+      <kbd>C</kbd><span>Crouch</span>
+      <kbd>Space</kbd><span>Jump</span>
+      <kbd>[ ]</kbd><span>Time of day −1 h / +1 h (test the lighting)</span>
+      <kbd>N</kbd><span>Next weather: clear → rain → fog → dust storm</span>
+      <kbd>F</kbd><span>Flashlight (at night)</span>
+      <kbd>F3</kbd><span>FPS counter</span>
+      <kbd>Esc</kbd><span>Pause</span>
+    </div>
+  </div>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

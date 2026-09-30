@@ -1,0 +1,281 @@
+<meta charset="utf-8">
+<title>The Last Signal</title>
+<meta name="description" content="A top-down open-world story game where every major choice is a real game theory model.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Stencil+Display:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+/* Single deliberate look: a city in blackout. Night asphalt ground,
+   amber = the radio signal (player/objective), teal = trust, red = danger. */
+:root{
+  --ground:#0b0f12; --panel:#11171b; --panel-2:#182126; --line:#2b373d;
+  --text:#dde0d7; --mute:#8d9892; --signal:#f2a93b; --signal-dim:#8a6224;
+  --trust:#4fb3a9; --danger:#e0533f; --pareto:#a898ff;
+  --display:'Big Shoulders Stencil Display', Impact, 'Arial Narrow', sans-serif;
+  --body:'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono:'IBM Plex Mono', ui-monospace, Consolas, monospace;
+  color-scheme:dark;
+}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;background:var(--ground);color:var(--text);font:14px/1.45 var(--body);overflow:hidden}
+#game{position:fixed;inset:0;width:100%;height:100%;display:block;filter:saturate(.72) contrast(1.06);transition:filter .6s}
+#game.desat{filter:grayscale(.92) contrast(1.1) brightness(.7)}
+#game.dawn{filter:saturate(1.15) sepia(.18) brightness(1.08)}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+.mono{font-family:var(--mono)}
+.eyebrow{font:600 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--signal)}
+
+/* ---------------- HUD ---------------- */
+.hud{position:fixed;pointer-events:none;z-index:5}
+#hud-tl{top:calc(14px + env(safe-area-inset-top,0px));left:16px;display:grid;gap:6px;width:220px}
+.bar{height:8px;background:#0006;border:1px solid var(--line);position:relative}
+.bar>i{position:absolute;inset:0;width:100%;background:var(--danger);transition:width .2s}
+#hp-bar>i{background:linear-gradient(90deg,#c9453a,#e36d4d)}
+#hud-weapon{font:600 12px var(--mono);color:var(--mute)}
+#hud-district{font:800 22px/1 var(--display);letter-spacing:.04em;text-transform:uppercase;color:var(--text);opacity:.9;text-shadow:0 2px 8px #000}
+#hud-tr{top:calc(14px + env(safe-area-inset-top,0px));right:16px;width:min(340px,calc(100vw - 32px));text-align:right;display:grid;gap:4px;justify-items:end}
+#hud-chapter{font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--signal)}
+#hud-objective{font:500 15px/1.3 var(--body);background:#000a;padding:6px 10px;border-right:3px solid var(--signal);text-wrap:balance}
+#hud-clock{font:12px var(--mono);color:var(--mute)}
+#hud-river{width:200px;display:grid;gap:3px;font:11px var(--mono);color:var(--mute)}
+#river-bar>i{background:linear-gradient(90deg,#2f7fa8,#4fb3d9)}
+#hud-br{bottom:calc(16px + env(safe-area-inset-bottom,0px));right:16px;width:230px;display:grid;gap:8px;background:#000a;padding:10px 12px;border:1px solid var(--line)}
+.trow{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:center}
+.trow b{font:600 12px var(--body)}
+.stars{font:12px var(--mono);letter-spacing:1px;color:var(--danger)}
+.stars .off{color:#ffffff22}
+.tbar{grid-column:1/-1;height:5px;background:#ffffff14;position:relative}
+.tbar>i{position:absolute;left:0;top:0;bottom:0;background:var(--trust);transition:width .4s}
+.tnum{font:11px var(--mono);color:var(--mute)}
+#minimap{position:fixed;left:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:170px;height:170px;border:1px solid var(--line);background:#000;z-index:5;pointer-events:none}
+#crosshair{position:fixed;width:18px;height:18px;margin:-9px 0 0 -9px;border:1.5px solid var(--signal);border-radius:50%;pointer-events:none;z-index:6;mix-blend-mode:screen}
+#toasts{position:fixed;top:calc(90px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);display:grid;gap:6px;z-index:20;pointer-events:none;justify-items:center;width:min(520px,calc(100vw - 32px))}
+.toast{background:#000c;border:1px solid var(--line);border-left:3px solid var(--trust);padding:7px 12px;font:500 13px var(--body);animation:tin .25s ease-out}
+.toast.warn{border-left-color:var(--danger)}
+.toast.gold{border-left-color:var(--signal)}
+@keyframes tin{from{opacity:0;transform:translateY(-6px)}}
+
+/* ---------------- Overlays ---------------- */
+.overlay{position:fixed;inset:0;z-index:30;display:grid;place-items:center;padding-inline:16px;background:#05080acc;overflow:auto}
+.overlay.clear{background:transparent;pointer-events:none}
+.sheet{background:var(--panel);border:1px solid var(--line);width:min(760px,100%);padding:26px 28px;display:grid;gap:14px;box-shadow:0 30px 80px #000c;margin-block:24px}
+.sheet h2{font:800 38px/1 var(--display);letter-spacing:.02em;margin:0;text-transform:uppercase;text-wrap:balance}
+.sheet h3{font:800 22px/1.1 var(--display);margin:6px 0 0;text-transform:uppercase;letter-spacing:.03em}
+.sheet p{margin:0;max-width:65ch;color:#c9cdc4}
+.btn{background:var(--signal);color:#1a1206;border:0;padding:10px 18px;font:600 14px var(--body);letter-spacing:.02em}
+.btn:hover{filter:brightness(1.1)}
+.btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+.btn.ghost:hover{border-color:var(--signal)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+
+/* Dialogue */
+#dialog{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(28px + env(safe-area-inset-bottom,0px));width:min(760px,calc(100vw - 32px));z-index:25;background:#070a0cee;border:1px solid var(--line);border-top:2px solid var(--signal);padding:14px 18px 12px;display:grid;gap:4px;cursor:pointer}
+#dialog .who{font:800 18px/1 var(--display);letter-spacing:.05em;text-transform:uppercase}
+#dialog .line{font:16px/1.5 var(--body);max-width:70ch}
+#dialog .hint{font:11px var(--mono);color:var(--mute);justify-self:end}
+#dialog.radio .line{font-family:var(--mono);font-size:14px}
+
+/* Decision screen */
+#decision .inner{width:min(900px,100%);display:grid;gap:18px;justify-items:center;text-align:center;margin-block:24px}
+#decision h2{font:800 clamp(34px,6vw,64px)/.95 var(--display);margin:0;text-transform:uppercase;letter-spacing:.02em;text-wrap:balance}
+#decision .prompt{max-width:60ch;color:#c9cdc4;font-size:15px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;width:100%}
+.card{background:var(--panel);border:1px solid var(--line);padding:22px 18px 18px;text-align:left;display:grid;gap:8px;align-content:start;transition:transform .15s,border-color .15s}
+.card:hover:not(:disabled){transform:translateY(-4px);border-color:var(--signal)}
+.card:disabled{opacity:.4;cursor:not-allowed}
+.card .k{font:600 11px var(--mono);color:var(--signal);letter-spacing:.1em}
+.card .t{font:800 26px/1 var(--display);text-transform:uppercase;letter-spacing:.02em}
+.card .s{font-size:13px;color:var(--mute)}
+.timer{width:min(520px,100%);height:4px;background:#ffffff18}
+.timer>i{display:block;height:100%;background:var(--signal);width:100%}
+.timer-num{font:600 13px var(--mono);color:var(--signal)}
+
+/* Payoff matrix */
+.matrix-wrap{overflow-x:auto}
+.matrix{display:grid;grid-template-columns:minmax(110px,auto) 1fr 1fr;gap:6px;min-width:440px}
+.matrix .hd{font:600 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--mute);display:flex;align-items:flex-end;padding:4px 6px}
+.matrix .rh{align-items:center}
+.cell{background:var(--panel-2);border:2px solid transparent;padding:12px;display:grid;gap:6px;min-height:84px;position:relative;animation:cin .4s ease-out backwards}
+.cell:nth-of-type(odd){animation-delay:.08s}
+@keyframes cin{from{opacity:0;transform:scale(.94)}}
+.cell .pay{font:600 20px var(--mono);font-variant-numeric:tabular-nums}
+.cell .pay small{font-size:11px;color:var(--mute);font-weight:400}
+.cell.chosen{border-color:var(--signal);box-shadow:0 0 0 4px #f2a93b22}
+.tags{display:flex;gap:4px;flex-wrap:wrap}
+.tag{font:600 10px var(--mono);letter-spacing:.08em;padding:2px 6px;text-transform:uppercase}
+.tag.nash{background:var(--trust);color:#06201d}
+.tag.pareto{background:var(--pareto);color:#17123a}
+.tag.you{background:var(--signal);color:#1a1206}
+.tag.risk{background:#ffffff22;color:var(--text)}
+.facts{display:grid;gap:4px;font:12.5px var(--mono);color:var(--mute)}
+.facts b{color:var(--text);font-weight:600}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font:11px var(--mono);color:var(--mute)}
+
+table.data{border-collapse:collapse;width:100%;font:13px var(--mono);font-variant-numeric:tabular-nums}
+table.data th,table.data td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
+table.data th{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);font-weight:600}
+.good{color:var(--trust)} .bad{color:var(--danger)} .gold{color:var(--signal)}
+
+/* Menu */
+#menu{background:radial-gradient(ellipse at 50% 30%,#1a2328 0%,#07090b 70%)}
+#menu .inner{display:grid;gap:22px;justify-items:start;width:min(620px,100%)}
+#menu h1{font:800 clamp(64px,13vw,132px)/.82 var(--display);margin:0;letter-spacing:.01em;text-transform:uppercase}
+#menu h1 span{color:var(--signal);display:block}
+#menu .tag-line{font:14px var(--mono);color:var(--mute);max-width:52ch}
+.menu-btns{display:grid;gap:8px;min-width:240px}
+.menu-btns .btn{text-align:left;padding:12px 18px}
+.signal-wave{height:34px;width:100%;max-width:420px}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:5px 16px;font:13px var(--body)}
+.keys kbd{font:600 12px var(--mono);background:var(--panel-2);border:1px solid var(--line);padding:2px 7px;color:var(--signal);justify-self:start}
+.phone-note{display:none;font:12px var(--mono);color:var(--danger)}
+@media (pointer:coarse){.phone-note{display:block}}
+
+/* Codex, demo */
+.codex-list{display:grid;gap:12px}
+.codex-item{border-left:2px solid var(--trust);padding:2px 0 2px 12px}
+.codex-item h4{margin:0;font:600 15px var(--body)}
+.codex-item p{font-size:13px}
+.codex-item.locked{border-left-color:var(--line);opacity:.45}
+#demo .sheet{width:min(820px,100%)}
+.demo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+select,input[type=number]{background:var(--panel-2);color:var(--text);border:1px solid var(--line);padding:6px 8px;font:13px var(--body)}
+.out{font:12px var(--mono);background:#000;border:1px solid var(--line);padding:10px;white-space:pre-wrap;max-height:220px;overflow:auto;color:#b8c2bb}
+input[type=range]{width:100%;accent-color:var(--signal)}
+.big-num{font:800 56px/1 var(--display);color:var(--signal)}
+#chaptercard{background:#000;z-index:40}
+#chaptercard .inner{text-align:center;display:grid;gap:10px;justify-items:center;animation:tin 1s ease-out}
+#chaptercard h2{font:800 clamp(48px,9vw,96px)/.9 var(--display);margin:0;text-transform:uppercase}
+#chaptercard p{color:var(--mute);font:14px var(--mono);max-width:50ch}
+canvas.lab{width:100%;height:auto;aspect-ratio:1920/1500;border:1px solid var(--line);background:var(--panel-2)}
+.sheet.wide{width:min(1100px,100%)}
+canvas.chart{width:100%;height:200px;background:var(--panel-2);border:1px solid var(--line)}
+/* ---------------- Part A: action HUD ---------------- */
+#act-timer,#act-chase{position:fixed;top:calc(14px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);z-index:6;background:#000b;border:1px solid var(--line);padding:6px 14px;display:grid;justify-items:center;gap:2px;pointer-events:none;min-width:200px}
+#act-timer b{font:800 32px/1 var(--display);color:var(--signal);font-variant-numeric:tabular-nums}
+#act-timer span,#act-chase span{font:600 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--mute)}
+#act-timer.warn b,#act-chase.warn span{color:var(--danger)}
+#act-chase{top:calc(64px + env(safe-area-inset-top,0px))}
+#act-chase b{font:800 22px/1 var(--display)}
+#act-chase .track{width:180px;height:5px;background:#ffffff18}#act-chase .track i{display:block;height:100%;background:var(--signal)}
+#boss-bar{position:fixed;top:calc(118px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);width:min(560px,calc(100vw - 32px));z-index:7;display:grid;gap:4px;pointer-events:none}
+#boss-bar .top{display:flex;justify-content:space-between;align-items:end}
+#boss-name{font:800 22px/1 var(--display);letter-spacing:.06em;color:var(--danger);text-shadow:0 2px 8px #000}
+#boss-pips{display:flex;gap:4px}#boss-pips i{width:18px;height:6px;background:#ffffff22}#boss-pips i.on{background:var(--danger)}
+#boss-bar .bar{height:12px}#boss-bar .bar>i{background:linear-gradient(90deg,#8a1f16,#e0533f)}
+#def-bar{position:fixed;top:calc(78px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);width:min(360px,calc(100vw - 32px));z-index:6;display:grid;gap:3px;pointer-events:none;font:600 11px var(--mono);color:var(--mute);text-transform:uppercase;letter-spacing:.08em}
+#def-bar .bar>i{background:var(--trust)}
+#act-prompt{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(150px + env(safe-area-inset-bottom,0px));z-index:6;background:#000b;border:1px solid var(--line);padding:6px 12px;font:500 14px var(--body);pointer-events:none;display:flex;gap:8px;align-items:center}
+#act-prompt kbd{font:600 12px var(--mono);background:var(--panel-2);border:1px solid var(--line);padding:1px 6px;color:var(--signal)}
+.pbar{display:inline-block;width:80px;height:5px;background:#ffffff22;vertical-align:middle}.pbar i{display:block;height:100%;background:var(--signal)}
+#act-banner{position:fixed;top:32%;left:50%;transform:translateX(-50%);z-index:8;font:800 clamp(28px,5vw,54px)/1 var(--display);letter-spacing:.06em;color:var(--signal);text-shadow:0 4px 24px #000;pointer-events:none;text-align:center;animation:tin .3s ease-out}
+#act-banner.warn{color:var(--danger)}
+#act-stock{position:fixed;left:200px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:6;font:600 12px var(--mono);color:var(--trust);background:#000a;padding:4px 8px;pointer-events:none}
+#act-heat{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(120px + env(safe-area-inset-bottom,0px));width:160px;height:6px;background:#ffffff18;z-index:6;pointer-events:none}#act-heat i{display:block;height:100%;background:linear-gradient(90deg,#f2a93b,#e0533f)}
+body.cinematic::before,body.cinematic::after{content:"";position:fixed;left:0;right:0;height:11vh;background:#000;z-index:24;animation:tin .5s ease-out}
+body.cinematic::before{top:0}body.cinematic::after{bottom:0}
+body.cinematic #hud-tl,body.cinematic #hud-tr,body.cinematic #minimap,body.cinematic #hud-br,body.cinematic #crosshair{opacity:0}
+#qte{position:fixed;inset:0;z-index:26;display:grid;place-items:center;pointer-events:none;background:radial-gradient(circle,#0000 30%,#000a 90%)}
+#qte .q{display:grid;justify-items:center;gap:10px}
+#qte .ring{position:relative;width:120px;height:120px}
+#qte svg{position:absolute;inset:0;transform:rotate(-90deg)}
+#qte-ring{stroke:var(--signal);stroke-width:8;fill:none;stroke-dasharray:283}
+#qte-key{position:absolute;inset:0;display:grid;place-items:center;font:800 34px/1 var(--display);color:var(--text)}
+#qte-text{font:800 26px/1 var(--display);letter-spacing:.08em;color:var(--signal);text-shadow:0 2px 12px #000}
+#hack .sheet{width:min(720px,100%)}
+#hack-cv{width:100%;height:auto;aspect-ratio:640/360;background:#0b1114;border:1px solid var(--line)}
+#hack-timer{height:5px;background:#ffffff18}#hack-timer i{display:block;height:100%;background:var(--trust)}
+#passed{background:#05080af0;z-index:35}
+#passed .inner{display:grid;gap:14px;justify-items:center;text-align:center;width:min(520px,100%)}
+#passed h2{font:800 clamp(52px,10vw,104px)/.85 var(--display);margin:0;color:var(--signal);letter-spacing:.02em;animation:tin .6s ease-out}
+#passed-rows{display:grid;gap:4px;width:100%;font:14px var(--mono)}#passed-rows div{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:4px 2px}#passed-rows b{color:var(--text)}
+#passed-rewards{margin:0;padding:0;list-style:none;display:grid;gap:4px;color:var(--trust);font:13px var(--mono)}
+h2.failed{color:var(--danger)}
+/* 3D mode: the Three.js canvas sits under a transparent overlay canvas */
+#view3d{position:fixed;inset:0;width:100%;height:100%;display:block}
+body.mode3d #game{filter:none;background:transparent}
+body.mode3d #crosshair{left:50%!important;top:50%!important}
+@media (max-width:640px){#hud-br{display:none}#minimap{width:110px;height:110px}.sheet{padding:18px}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<canvas id="view3d"></canvas>
+<canvas id="game"></canvas>
+<canvas id="minimap" width="340" height="340"></canvas>
+<div id="crosshair" hidden></div>
+
+<div id="hud-tl" class="hud" hidden>
+  <div id="hud-district">Lakeside</div>
+  <div class="bar" id="hp-bar"><i></i></div>
+  <div id="hud-weapon">Pistol</div>
+</div>
+<div id="hud-tr" class="hud" hidden>
+  <div id="hud-chapter">Prologue</div>
+  <div id="hud-objective">—</div>
+  <div id="hud-river" hidden><span>River health <b id="river-num">100</b></span><div class="bar" id="river-bar"><i></i></div></div>
+  <div id="hud-clock">07:00</div>
+</div>
+<div id="hud-br" class="hud" hidden></div>
+<div id="toasts"></div>
+<div id="act-timer" hidden><span>Timer</span><b>1:30</b></div>
+<div id="act-chase" hidden><span>Chasing</span><b>0 m</b><div class="track"><i></i></div></div>
+<div id="boss-bar" hidden><div class="top"><div id="boss-name">BOSS</div><div id="boss-pips"></div></div><div class="bar"><i></i></div></div>
+<div id="def-bar" hidden><div class="top"><span id="def-name">Objective</span> · <span id="def-wave"></span></div><div class="bar"><i></i></div></div>
+<div id="act-prompt" hidden></div>
+<div id="act-banner" hidden></div>
+<div id="act-stock" hidden></div>
+<div id="act-heat" hidden><i></i></div>
+<div id="qte" hidden><div class="q"><div class="ring"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" id="qte-ring"/></svg><div id="qte-key">E</div></div><div id="qte-text">PRESS</div></div></div>
+<div id="hack" class="overlay" hidden><div class="sheet"><div class="eyebrow">Hacking</div><h2 id="hack-title">Bypass</h2><p id="hack-help"></p><canvas id="hack-cv" width="640" height="360"></canvas><div id="hack-timer"><i></i></div><p class="mono" style="font-size:12px;color:var(--mute)">Esc gives up.</p></div></div>
+<div id="passed" class="overlay" hidden><div class="inner"><div class="eyebrow" id="passed-title">Prologue</div><h2>Mission passed</h2><div id="passed-rows"></div><ul id="passed-rewards"></ul><button class="btn" id="passed-ok">Continue</button></div></div>
+<div id="dialog" hidden><div class="who"></div><div class="line"></div><div class="hint">Space / click to continue</div></div>
+
+<div id="decision" class="overlay clear" hidden>
+  <div class="inner" style="pointer-events:auto">
+    <div class="eyebrow" id="dec-eyebrow"></div>
+    <h2 id="dec-title"></h2>
+    <p class="prompt" id="dec-prompt"></p>
+    <div class="cards" id="dec-cards"></div>
+    <div class="timer" id="dec-timer"><i></i></div>
+    <div class="timer-num" id="dec-timer-num"></div>
+  </div>
+</div>
+
+<div id="panel" class="overlay" hidden><div class="sheet" id="panel-sheet"></div></div>
+<div id="chaptercard" class="overlay" hidden><div class="inner"><div class="eyebrow" id="cc-eyebrow"></div><h2 id="cc-title"></h2><p id="cc-sub"></p></div></div>
+
+<div id="menu" class="overlay">
+  <div class="inner">
+    <div class="eyebrow">Solace City · 2041 · 18 months after the blackout</div>
+    <h1>The Last <span>Signal</span></h1>
+    <canvas class="signal-wave" id="wave" width="840" height="68"></canvas>
+    <p class="tag-line">Four colonies, one broken power grid. Every deal you make is a real game theory model, and the colonies remember all of them.</p>
+    <div class="menu-btns">
+      <button class="btn" id="btn-new">New game</button>
+      <button class="btn ghost" id="btn-continue" hidden>Continue</button>
+      <button class="btn ghost" id="btn-controls">Controls</button>
+      <button class="btn ghost" id="btn-lab">Character lab</button>
+      <button class="btn ghost" id="btn-demo">Examiner demo mode</button>
+    </div>
+    <p class="phone-note">Best played with a keyboard and mouse on a laptop or PC.</p>
+  </div>
+</div>
+
+<script>
+  // 3D is the default. Add ?2d to the address to play the original top-down view.
+  window.GAME_3D = !/[?&]2d/.test(location.search);
+  if (!window.GAME_3D) document.getElementById('view3d').remove();
+</script>
+<script src="gametheory.js?v=13"></script>
+<script src="characters.js?v=13"></script>
+<script src="game.js?v=13"></script>
+<script src="action.js?v=13"></script>
+<script src="missions.js?v=13"></script>
+<script src="chapter1.js?v=13"></script>
+<script src="chapter2.js?v=13"></script>
+<script src="chapter3.js?v=13"></script>
+<script src="chapter4.js?v=13"></script>
+<script src="chapter5.js?v=13"></script>
+<script src="chapter6.js?v=13"></script>
+<script src="chapter7.js?v=13"></script>
+<script type="module">if (window.GAME_3D) import('./engine/engine.js?v=' + Date.now()).catch(e => { console.error(e); alert('3D engine failed to load: ' + e.message + '. Open with ?2d for the classic view.'); });</script>

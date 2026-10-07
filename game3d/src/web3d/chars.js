@@ -369,17 +369,28 @@ function poseSkinned(r, st) {
   if (!(st.hit > 0)) r.hitNow = false;
   if (r.oneShot) { r.oneShotT -= dt; if (r.oneShotT <= 0.05) { r.oneShot.fadeOut(0.15); r.oneShot = null; } }
 
+  // undo last frame's additive offsets first: bones a clip doesn't key are never reset by the
+  // mixer, so adding on top every frame would make the offsets pile up and bend the body
+  if (r.add) {
+    if (r.chest) r.chest.rotation.x -= r.add.cx;
+    if (r.hips) r.hips.rotation.z -= r.add.hz;
+    if (r.head) { r.head.rotation.y -= r.add.hy; r.head.rotation.x -= r.add.hx; }
+  }
+  r.add = { cx: 0, hz: 0, hy: 0, hx: 0 };
   r.mixer.update(dt);
   // ---- additive layers on top of the clips ----
   r.t += dt;
   const calm = (state === 'idle' || state === 'armed') ? 1 : state === 'aim' ? 0.3 : 0.15;
   const breathe = Math.sin(r.t * (sp > 3 ? 3.2 : 1.6) + r.seed);                       // faster after running
-  if (r.chest) r.chest.rotation.x += breathe * 0.025 * (sp > 3 ? 1.6 : 1);
-  if (r.hips && calm > 0.9) { r.hips.rotation.z += Math.sin(r.t * 0.45 + r.seed) * 0.03; }   // slow weight shift between feet
-  if (r.head && calm > 0.5 && !st.aiming) {                                              // idle: glance around now and then
-    const look = Math.sin(r.t * 0.33 + r.seed) * Math.max(0, Math.sin(r.t * 0.13 + r.seed * 2));
-    r.head.rotation.y += look * 0.5; r.head.rotation.x += Math.sin(r.t * 0.21 + r.seed) * 0.06;
+  r.add.cx = breathe * 0.025 * (sp > 3 ? 1.6 : 1);
+  if (calm > 0.9) r.add.hz = Math.sin(r.t * 0.45 + r.seed) * 0.03;                      // slow weight shift between feet
+  if (calm > 0.5 && !st.aiming) {                                                       // idle: glance around now and then
+    r.add.hy = Math.sin(r.t * 0.33 + r.seed) * Math.max(0, Math.sin(r.t * 0.13 + r.seed * 2)) * 0.5;
+    r.add.hx = Math.sin(r.t * 0.21 + r.seed) * 0.06;
   }
+  if (r.chest) r.chest.rotation.x += r.add.cx;
+  if (r.hips) r.hips.rotation.z += r.add.hz;
+  if (r.head) { r.head.rotation.y += r.add.hy; r.head.rotation.x += r.add.hx; }
   if (r.hand) {                                                          // weapon: glue to the right hand
     r.root.updateWorldMatrix(true, true);
     r.hand.getWorldPosition(_hp); r.root.worldToLocal(_hp); r.grip.position.copy(_hp);

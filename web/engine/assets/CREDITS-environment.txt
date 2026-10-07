@@ -1,0 +1,11 @@
+Environment assets (all CC0 1.0 / public domain - no attribution required, credited as a courtesy)
+
+HDRI (assets/hdri/), from Poly Haven - https://polyhaven.com - CC0
+  wide_street_01_1k.hdr     "Wide Street 01" by Sergej Majboroda   https://polyhaven.com/a/wide_street_01
+  sunset_jhbcentral_1k.hdr  "Sunset Jhb Central"                    https://polyhaven.com/a/sunset_jhbcentral
+
+PBR textures (assets/tex/), from ambientCG - https://ambientcg.com - CC0 (1K-JPG: Color, NormalGL, Roughness)
+  asphalt_*   Asphalt031          https://ambientcg.com/view?id=Asphalt031
+  brick_*     Bricks097           https://ambientcg.com/view?id=Bricks097
+  concrete_*  Concrete034         https://ambientcg.com/view?id=Concrete034
+  plaster_*   PaintedPlaster017   https://ambientcg.com/view?id=PaintedPlaster017

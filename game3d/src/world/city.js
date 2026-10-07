@@ -6,6 +6,30 @@
 import * as THREE from 'three';
 import { createWater } from './water.js';
 import { wetU } from './weather.js';
+
+// ---------------------------------------------------------------------
+// Photographed PBR texture sets (ambientCG, CC0) in web/engine/assets/tex.
+// Each shader samples them in WORLD space (no UVs needed), so every wall
+// and street of any size tiles correctly. Until a file arrives, a neutral
+// 1x1 map stands in, so the game never waits on a download.
+// ---------------------------------------------------------------------
+const texLoader = new THREE.TextureLoader();
+const neutral = (r, g, b) => { const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1); t.needsUpdate = true; return t; };
+function pbrSet(name) {
+  const set = { color: { value: neutral(128, 128, 128) }, normal: { value: neutral(128, 128, 255) }, rough: { value: neutral(220, 220, 220) } };
+  for (const [k, file, srgb] of [['color', 'color', true], ['normal', 'normal', false], ['rough', 'roughness', false]]) {
+    texLoader.load(new URL('assets/tex/' + name + '_' + file + '.jpg', import.meta.url).href, t => {
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+      set[k].value = t;
+    }, undefined, () => { /* missing file: keep the neutral map */ });
+  }
+  return set;
+}
+export const TEX = { asphalt: pbrSet('asphalt'), brick: pbrSet('brick'), concrete: pbrSet('concrete'), plaster: pbrSet('plaster') };
+const texUniforms = sh => {
+  for (const [n, set] of Object.entries(TEX)) { sh.uniforms[`t_${n}C`] = set.color; sh.uniforms[`t_${n}N`] = set.normal; sh.uniforms[`t_${n}R`] = set.rough; }
+};
+const TEX_DECL = Object.keys({ asphalt: 1, brick: 1, concrete: 1, plaster: 1 }).map(n => `uniform sampler2D t_${n}C, t_${n}N, t_${n}R;`).join('\n');
 import { MAP_TO_M as S, WORLD, RIVER, BRIDGE, ROADV, ROADH, RW, DISTRICTS, SPECIAL, DOCKS, mulberry } from '../core/worldLayout.js';
 
 export const RIVER_BED = -3.2, WATER_Y = -1.3;
@@ -70,7 +94,7 @@ const WALLS = ['#8a857b', '#77746d', '#6f5a4a', '#8c6f58', '#6b7270', '#9a9384',
 export function facadeMaterial() {
   const m = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0.0 });
   m.onBeforeCompile = sh => {
-    sh.uniforms.uWet = wetU;
+    sh.uniforms.uWet = wetU; texUniforms(sh);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vLsPos; varying vec3 vLsNrm; varying vec3 vLsBld;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
@@ -87,6 +111,10 @@ export function facadeMaterial() {
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         varying vec3 vLsPos; varying vec3 vLsNrm; varying vec3 vLsBld; uniform float uWet;
+        ${TEX_DECL}
+        vec3 lsNm;     // tangent-space normal from the photographed texture (0,0,1 = flat)
+        vec3 lsT;      // world tangent of the wall (horizontal, along u)
+        float lsRo;    // roughness from the texture
         float lsHgt;   // surface relief (0 = wall face, negative = grooves / recesses), turned into a bumped normal below
         float fHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float fNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -94,38 +122,36 @@ export function facadeMaterial() {
       .replace('#include <color_fragment>', `#include <color_fragment>
         float lsWin = 0.0; lsHgt = 0.0;
         diffuseColor.rgb *= mix(1.0, 0.72, uWet);                        // rain-soaked walls go darker
-        // ---- wall MATERIAL per building: brick, precast concrete panels, or cracked plaster ----
+        // ---- wall MATERIAL per building: photographed brick, concrete or painted plaster ----
         float bType = fract(sin(dot(floor(vLsBld.xz), vec2(17.13, 91.7))) * 4375.85);
+        lsNm = vec3(0.0, 0.0, 1.0); lsRo = -1.0; lsT = vec3(1.0, 0.0, 0.0);
         {
           vec3 wn = normalize(vLsNrm);
+          vec3 tint = diffuseColor.rgb / max(dot(diffuseColor.rgb, vec3(0.3333)), 0.02);   // the building's palette HUE, brightness 1.0
           if (abs(wn.y) < 0.5) {
-            float wu = abs(wn.x) > 0.5 ? vLsPos.z : vLsPos.x, wy = vLsPos.y;
+            lsT = normalize(cross(vec3(0.0, 1.0, 0.0), wn));
+            float wu = dot(vLsPos, lsT), wy = vLsPos.y;
+            float abs_u = abs(wn.x) > 0.5 ? vLsPos.z : vLsPos.x;
             if (bType < 0.42) {
-              // BRICK: 0.5 x 0.22 m courses, every other course offset half a brick, recessed mortar joints
-              vec2 bc = vec2(wu / 0.5 + 0.5 * step(0.5, fract(wy / 0.44)), wy / 0.22);
-              vec2 bf = fract(bc), bid = floor(bc);
-              float mortar = 1.0 - step(0.06, bf.x) * step(bf.x, 0.94) * step(0.1, bf.y) * step(bf.y, 0.9);
-              float bh = fHash(bid);
-              vec3 brick = mix(vec3(0.55, 0.26, 0.18), vec3(0.42, 0.22, 0.17), bh) * (0.85 + 0.3 * fNoise(bc * 3.0));
-              brick = mix(brick, vec3(0.3, 0.27, 0.25), step(0.93, bh) * 0.7);      // the odd burnt brick
-              diffuseColor.rgb = mix(brick * 1.4, vec3(0.62, 0.6, 0.55), mortar) * mix(vec3(1.0), diffuseColor.rgb * 1.5, 0.25);
-              lsHgt = -mortar * 0.6 + (fNoise(bc * 6.0) - 0.5) * 0.15;
+              vec2 uv = vec2(wu, wy) / 1.6;                                   // ~1.6 m per brick tile
+              diffuseColor.rgb = texture2D(t_brickC, uv).rgb * mix(vec3(1.0), tint, 0.15) * 1.5;
+              lsNm = texture2D(t_brickN, uv).xyz * 2.0 - 1.0; lsRo = texture2D(t_brickR, uv).r;
             } else if (bType < 0.75) {
-              // PRECAST CONCRETE: 3.1 x 3.4 m panels with deep seams, bug-holes and formwork marks
-              vec2 pc = vec2(wu / 3.1, wy / 3.4), pf = fract(pc);
+              vec2 uv = vec2(wu, wy) / 3.0;
+              vec3 c = texture2D(t_concreteC, uv).rgb;
+              vec2 pf = fract(vec2(wu / 3.1, wy / 3.4));
               float seam = 1.0 - step(0.012, pf.x) * step(pf.x, 0.988) * step(0.012, pf.y) * step(pf.y, 0.988);
-              float pores = step(0.93, fHash(floor(vec2(wu, wy) * 14.0)));
-              diffuseColor.rgb *= (0.9 + 0.2 * fNoise(vec2(wu, wy) * 1.3)) * (1.0 - 0.45 * seam) * (1.0 - 0.25 * pores);
-              diffuseColor.rgb *= 1.0 - 0.06 * step(0.5, fract(wy * 1.2));          // horizontal formwork boards
-              lsHgt = -seam * 0.9 - pores * 0.3;
+              diffuseColor.rgb = c * mix(vec3(1.0), tint, 0.35) * 0.6 * (1.0 - 0.45 * seam);
+              lsNm = texture2D(t_concreteN, uv).xyz * 2.0 - 1.0; lsRo = texture2D(t_concreteR, uv).r;
+              lsHgt = -seam * 0.9;
             } else {
-              // PLASTER: rough render; where it has fallen off, brick shows through
-              float rough = fNoise(vec2(wu, wy) * 9.0);
+              vec2 uv = vec2(wu, wy) / 2.4;
               float spall = smoothstep(0.66, 0.68, fNoise(vec2(wu, wy) * 0.8 + bType * 30.0) + 0.12 * fNoise(vec2(wu, wy) * 12.0));
-              vec2 bc = vec2(wu / 0.5 + 0.5 * step(0.5, fract(wy / 0.44)), wy / 0.22);
-              vec3 under = mix(vec3(0.5, 0.25, 0.18), vec3(0.6, 0.58, 0.52), 1.0 - step(0.08, fract(bc.x)) * step(0.12, fract(bc.y)));
-              diffuseColor.rgb = mix(diffuseColor.rgb * (0.92 + 0.16 * rough), under, spall);
-              lsHgt = (rough - 0.5) * 0.25 - spall * 0.5;
+              vec2 buv = vec2(wu, wy) / 1.6;
+              diffuseColor.rgb = mix(texture2D(t_plasterC, uv).rgb * mix(vec3(1.0), tint, 0.6) * 0.6, texture2D(t_brickC, buv).rgb * 1.5, spall);
+              lsNm = mix(texture2D(t_plasterN, uv).xyz, texture2D(t_brickN, buv).xyz, spall) * 2.0 - 1.0;
+              lsRo = mix(texture2D(t_plasterR, uv).r, texture2D(t_brickR, buv).r, spall);
+              lsHgt = -spall * 0.5;
             }
             // ---- GRAFFITI: spray-paint tags (squiggly iso-lines of noise) on about half the ground floors ----
             if (wy < 2.6 && fract(bType * 7.7) < 0.5) {
@@ -179,9 +205,17 @@ export function facadeMaterial() {
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.75, 0.55, 0.4), drip * 0.6);
           lsWin *= 1.0 - broken * step(0.45, shard);                    // holes are not shiny
         } else {
-          diffuseColor.rgb *= 0.62;                                     // flat roofs are darker
+          diffuseColor.rgb = texture2D(t_concreteC, vLsPos.xz / 3.0).rgb * 0.4;   // flat concrete roofs, darker
         }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          vec3 wN = normalize(vLsNrm);
+          if (abs(wN.y) < 0.5) {
+            vec3 wB = vec3(0.0, 1.0, 0.0);
+            vec3 pw = normalize(lsT * lsNm.x * 1.4 + wB * lsNm.y * 1.4 + wN * lsNm.z);
+            normal = normalize((viewMatrix * vec4(pw, 0.0)).xyz);
+          }
+        }
         {
           vec3 dpx = dFdx(-vViewPosition), dpy = dFdy(-vViewPosition);
           float dhx = dFdx(lsHgt) * 0.06, dhy = dFdy(lsHgt) * 0.06;
@@ -191,6 +225,7 @@ export function facadeMaterial() {
           normal = normalize(abs(det) * normal - grad);
         }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        if (lsRo >= 0.0) roughnessFactor = mix(0.55, 1.0, lsRo);
         roughnessFactor = mix(roughnessFactor, 0.18, lsWin);
         roughnessFactor = mix(roughnessFactor, 0.55, uWet * (1.0 - lsWin));`)
       .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
@@ -213,13 +248,14 @@ export function buildCity(scene, layout) {
   // Wet streets: in rain the ground darkens and noise-shaped puddles turn mirror-smooth,
   // so they reflect the sky (environment map). Puddles are always in the same places.
   groundMat.onBeforeCompile = sh => {
-    sh.uniforms.uWet = wetU;
+    sh.uniforms.uWet = wetU; texUniforms(sh);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGW;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         varying vec3 vGW; uniform float uWet;
+        ${TEX_DECL}
         float lsHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float lsNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
           return mix(mix(lsHash(i), lsHash(i + vec2(1, 0)), f.x), mix(lsHash(i + vec2(0, 1)), lsHash(i + vec2(1, 1)), f.x), f.y); }`)
@@ -230,16 +266,19 @@ export function buildCity(scene, layout) {
         float lsGrit = lsNoise(vGW.xz * 3.1) * 0.5 + lsNoise(vGW.xz * 11.0) * 0.3 + lsHash(floor(vGW.xz * 40.0)) * 0.2;
         float lsWear = smoothstep(0.35, 0.75, lsNoise(vGW.xz * 0.35 + 7.0));
         diffuseColor.rgb *= 0.78 + 0.4 * lsGrit;
+        // photographed asphalt grain (luminance only, so the painted roads / dirt keep their colour)
+        vec3 lsAs = texture2D(t_asphaltC, vGW.xz / 3.0).rgb;
+        diffuseColor.rgb *= clamp(dot(lsAs, vec3(0.333)) / 0.195, 0.5, 1.6);
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.08, 1.02, 0.92), lsWear * 0.5);
         // CRACKS: edges of a 2.5 m Voronoi pattern, only where the ground is worn
-        vec2 cg = vGW.xz / 2.5, ci = floor(cg), cf = fract(cg);
+        vec2 cg = vGW.xz / 1.8 + (vec2(lsNoise(vGW.xz * 1.7), lsNoise(vGW.xz * 1.7 + 5.0)) - 0.5) * 0.45, ci = floor(cg), cf = fract(cg);   // wobbly cells
         float d1 = 8.0, d2 = 8.0;
         for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
           vec2 o = vec2(float(i), float(j)), pt = vec2(lsHash(ci + o), lsHash(ci + o + 19.1));
           float d = length(o + pt - cf); if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
         }
-        float lsCrack = (1.0 - smoothstep(0.0, 0.035, d2 - d1)) * smoothstep(0.45, 0.7, lsNoise(vGW.xz * 0.07 + 3.0));
-        diffuseColor.rgb *= 1.0 - 0.75 * lsCrack;
+        float lsCrack = (1.0 - smoothstep(0.0, 0.018, d2 - d1)) * smoothstep(0.6, 0.8, lsNoise(vGW.xz * 0.07 + 3.0)) * step(0.35, lsNoise(vGW.xz * 0.9 + 11.0));   // thin, broken, only in patches
+        diffuseColor.rgb *= 1.0 - 0.5 * lsCrack;
         // OIL STAINS: dark glossy blots
         float lsOil = smoothstep(0.78, 0.82, lsNoise(vGW.xz * 0.45 + 31.0)) * step(0.6, lsNoise(vGW.xz * 0.05));
         diffuseColor.rgb *= 1.0 - 0.6 * lsOil;
@@ -254,8 +293,15 @@ export function buildCity(scene, layout) {
         float lsPuddle = smoothstep(0.56, 0.6, n) * smoothstep(0.15, 0.6, uWet);
         diffuseColor.rgb *= mix(1.0, 0.6, uWet);
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.4, lsPuddle);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          vec3 an = texture2D(t_asphaltN, vGW.xz / 3.0).xyz * 2.0 - 1.0;
+          vec3 pw = normalize(vec3(an.x, 0.0, -an.y) * 1.3 + vec3(0.0, an.z, 0.0));   // ground: tangent = +x, bitangent = -z
+          normal = normalize((viewMatrix * vec4(pw, 0.0)).xyz);
+        }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
         roughnessFactor = clamp(roughnessFactor - 0.12 * lsGrit + 0.06, 0.6, 1.0);
+        roughnessFactor = mix(roughnessFactor, mix(0.7, 1.0, texture2D(t_asphaltR, vGW.xz / 3.0).r), 0.6);
         roughnessFactor = mix(roughnessFactor, 0.25, lsOil);
         roughnessFactor = mix(roughnessFactor, 0.45, uWet);
         roughnessFactor = mix(roughnessFactor, 0.02, lsPuddle);`);

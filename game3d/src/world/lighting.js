@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { CSM } from 'three/addons/csm/CSM.js';
+import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const LIT = m => m && (m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial);
@@ -113,6 +114,14 @@ export function createLighting({ scene, bg, renderer, camera, preset }) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envScene = new THREE.Scene(); const envSky = new Sky(); envSky.scale.setScalar(1000); envScene.add(envSky);
   let envRT = null, envTimer = 0, lastEnvClock = -999, lastFov = 0;
+  // Photographed city HDRIs (Poly Haven, CC0) for reflections and ambient light: a midday street and a sunset.
+  // The visible sky stays the physical sky (it follows the clock); the HDRI only lights and reflects.
+  const hdri = { day: null, sunset: null };
+  for (const [k, file] of [['day', 'wide_street_01_1k.hdr'], ['sunset', 'sunset_jhbcentral_1k.hdr']]) {
+    new HDRLoader().load(new URL('assets/hdri/' + file, import.meta.url).href,
+      t => { t.mapping = THREE.EquirectangularReflectionMapping; hdri[k] = pmrem.fromEquirectangular(t).texture; t.dispose(); envTimer = 0; },
+      undefined, () => { /* host can't serve .hdr: keep the sky-generated environment */ });
+  }
   const state = { preset, sunDir: new THREE.Vector3(), daylight: 1, golden: 0 };
 
   function setPreset(p) {
@@ -166,7 +175,7 @@ export function createLighting({ scene, bg, renderer, camera, preset }) {
     hemi.intensity = 0.65 + 0.3 * day; bgHemi.intensity = hemi.intensity * 0.9;   // strong ambient floor at night
     hemi.color.setRGB(0.6 + 0.15 * day, 0.68 + 0.12 * day, 0.85); hemi.groundColor.setRGB(0.3 - 0.07 * day, 0.26 - 0.05 * day, 0.24 - 0.08 * day);
     // night gets a little more exposure (like eyes adapting) so streets stay readable
-    renderer.toneMappingExposure = 0.55 + (1 - day) * 0.47 + oc * 0.08;
+    renderer.toneMappingExposure = 0.6 + (1 - day) * 0.42 + oc * 0.08;
 
     // fog colour: haze by day, orange at sunset, deep blue at night, then the weather tint
     const fog = scene.fog.color;
@@ -181,8 +190,10 @@ export function createLighting({ scene, bg, renderer, camera, preset }) {
     envTimer -= dt;
     if (envTimer <= 0 || Math.abs(clock - lastEnvClock) > 30) {
       envTimer = 8; lastEnvClock = clock;
-      const old = envRT; envRT = pmrem.fromScene(envScene); scene.environment = envRT.texture; bg.environment = envRT.texture;
-      scene.environmentIntensity = (0.16 + 0.12 * day) * (1 - oc * 0.4);
+      const old = envRT; envRT = pmrem.fromScene(envScene);
+      const photo = day > 0.3 ? (golden > 0.45 && hdri.sunset ? hdri.sunset : hdri.day) : null;
+      scene.environment = photo || envRT.texture; bg.environment = scene.environment;
+      scene.environmentIntensity = photo ? (0.22 + 0.33 * day) * (1 - oc * 0.45) : (0.16 + 0.12 * day) * (1 - oc * 0.4);
       if (old) old.dispose();
     }
   }

@@ -191,6 +191,47 @@ export function buildDrone() {
 // simulation state and crossfades to it; one-shots (shot, punch, hit)
 // play on top. Until the files load, the procedural rig is used.
 // =====================================================================
+/**
+ * The pack ships every material as 40% metallic and fairly glossy, which reads as plastic toys.
+ * Real surfaces: skin and cloth are dielectric (metalness 0); fabric is very rough, skin is soft,
+ * eyes are wet. Cloth also gets 18 months of survival: faded colour, grime patches and road dust
+ * caked on from the boots up to the knees.
+ */
+const CLOTH_UNIFORM = { value: 1 };
+function realMaterial(m, fit) {
+  if (!m || m.userData.real) return; m.userData.real = true;
+  const n = m.name || '';
+  m.metalness = /Gold|Visor/i.test(n) ? 0.6 : 0;
+  if (/^Skin/i.test(n)) { m.roughness = 0.58; return; }
+  if (/Hair|Eyebrows|Moustache/i.test(n)) { m.roughness = 0.55; return; }
+  if (/^Eye$/i.test(n)) { m.roughness = 0.08; return; }
+  if (/Visor/i.test(n)) { m.roughness = 0.15; return; }
+  m.roughness = /Black|Swat/i.test(n) ? 0.78 : 0.9;
+  const hsl = {}; m.color.getHSL(hsl); m.color.setHSL(hsl.h, hsl.s * 0.78, hsl.l * 0.92);   // sun-faded fabric
+  m.onBeforeCompile = sh => {
+    sh.uniforms.uFit = { value: fit };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vClO; varying float vClY; uniform float uFit;`)
+      .replace('#include <skinning_vertex>', `#include <skinning_vertex>
+vClO = position * uFit; vClY = (modelMatrix * vec4(transformed, 1.0)).y;`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vClO; varying float vClY;
+        float cH(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+        float cN(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(mix(cH(i), cH(i + vec3(1,0,0)), f.x), mix(cH(i + vec3(0,1,0)), cH(i + vec3(1,1,0)), f.x), f.y),
+                     mix(mix(cH(i + vec3(0,0,1)), cH(i + vec3(1,0,1)), f.x), mix(cH(i + vec3(0,1,1)), cH(i + vec3(1,1,1)), f.x), f.y), f.z); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float grime = smoothstep(0.45, 0.85, cN(vClO * 9.0)) * 0.35 + cN(vClO * 40.0) * 0.12;
+        diffuseColor.rgb *= 1.0 - grime;
+        float h = vClY - floor(vClY / 50.0) * 50.0;                      // height above the feet (ground level is ~0)
+        float dustK = smoothstep(0.6, 0.05, h + (cN(vClO * 14.0) - 0.5) * 0.25);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.36, 0.31, 0.25), dustK * 0.7);`);
+  };
+  m.needsUpdate = true;
+}
+
 const OUTFITS = ['Casual2', 'Suit', 'Worker', 'Farmer', 'Swat', 'Punk', 'Casual', 'Adventurer'];
 const MODELS = {};
 const loader = new GLTFLoader();
@@ -200,6 +241,7 @@ for (const name of OUTFITS) {
     g.clips = Object.fromEntries(g.animations.map(c => [c.name.replace(/^.*\|/, ''), c]));
     const box = new THREE.Box3().setFromObject(g.scene);                  // normalise to 1.78 m tall
     g.fit = 1.78 / Math.max(0.1, box.max.y - box.min.y);
+    g.scene.traverse(o => { if (o.isMesh) for (const m of [].concat(o.material)) realMaterial(m, g.fit); });
     MODELS[name] = g;
   };
   // Hosts that can't serve .glb get <name>.glb.js (the same file as base64 in a JS module) instead.

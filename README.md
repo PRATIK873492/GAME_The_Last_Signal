@@ -143,3 +143,23 @@ After editing `game3d/src`, rebuild the engine with: `cd game3d && npm run build
 - All people are rigged, clothed, animated models from Quaternius's **Ultimate Animated Character Pack** (CC0, public domain; `game3d/public/assets/people/`, credits in `CREDITS.txt`). Outfits: Casual2 (Veer), Suit (Kane, Silas), Punk (Rhea), Casual (Elena), Adventurer (Tara), Farmer (Baba Jogi), Worker (Razor), Swat (Helix troopers); survivors get a stable random outfit, with skin and hair recoloured.
 - 24 shared motion clips drive a small state machine in `game3d/src/web3d/chars.js`: idle, walk, run, gun idle / aim / shoot, run-and-shoot, punches and kicks, roll, hit reaction, death. Guns are attached to the right hand bone.
 - Vehicles (`game3d/src/web3d/vehicles.js`) are built in code from extruded side profiles with clear-coat paint, glass, rimmed tyres, arches, bumpers, grille, lights and mirrors.
+
+---
+
+## UE5 visual layer (Source/LastSignal/Visuals)
+
+Code and config are in place; the art is made in the editor. Full guide: the "UE5 Visual Setup Guide" doc.
+
+| File | What it does |
+|---|---|
+| `Visuals/WorldStateVisuals.*` | Listens to `UGameTheorySubsystem::OnRoundResolved`. Drives `MPC_Weather` (Wetness, Puddles, Dust, FogDensity; a dead river forces dust), blends `PPV_Decision` with 0.15x slow motion (`BeginDecision` / `EndDecision`), fires `OnColonyReaction` for Blueprint |
+| `Visuals/DayNightManager.*` | Sun / moon / sky light / height-fog colour from `TimeOfDay` (same curve as the web build); actors tagged `StreetLamp` switch on at dusk, ~15% flicker |
+| `Visuals/LastSignalGraphics.*` | `ApplyGraphicsPreset(Low..Ultra)` and `ApplyRecommendedPreset()` for the pause menu |
+| `Config/DefaultScalability.ini` | Low (GTX 1660) / High (RTX) overrides |
+| `LastSignal.uproject` | Enables Motion Matching (PoseSearch, Chooser, warping, locomotion library), Control Rig + Full Body IK, PCG, Water, Movie Render Queue |
+
+**Editor steps after building:**
+1. Create `MPC_Weather` (scalars Wetness, Puddles, Dust, FogDensity) and `MPC_Time` (Daylight, TimeOfDay); read them in your surface materials.
+2. In `Maps/SolaceCity` place a Sky Atmosphere, Volumetric Cloud, Sky Light (real-time capture), Exponential Height Fog (volumetric on), two Directional Lights (sun, moon: set the moon as *Atmosphere Sun Light index 1*), an unbound Post Process Volume (grade) and `PPV_Decision` (unbound, weight 0).
+3. Place `DayNightManager` and `WorldStateVisuals` and assign those references. Tag street-lamp actors `StreetLamp`.
+4. Characters: MetaHuman Creator (install the MetaHuman plugin from Fab first) and the Game Animation Sample for Motion Matching.

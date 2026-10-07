@@ -11,7 +11,7 @@ public class LastSignal : ModuleRules
 
 		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core", "CoreUObject", "Engine", "InputCore",
-			"EnhancedInput", "UMG", "DeveloperSettings"
+			"EnhancedInput", "UMG", "DeveloperSettings", "RHI"
 		});
 	}
 }

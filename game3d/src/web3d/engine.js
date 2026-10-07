@@ -197,11 +197,26 @@ function drawPerson(e, cfg, st, pos) {
   let m = motion.get(e);
   if (!m) { m = { yaw: want, lean: 0, tilt: 0, spd: st.speed || 0 }; motion.set(e, m); r.root.rotation.order = 'YXZ'; }
   const prevYaw = m.yaw;
-  m.yaw = st.dead || st.mounted ? want : dampAngle(m.yaw, want, st.aiming ? 22 : 11, dt);   // aiming stays crisp
+  m.yaw = st.mounted ? want : st.dead ? m.yaw : dampAngle(m.yaw, want, st.aiming ? 22 : 11, dt);   // a body keeps its own (spun) heading   // aiming stays crisp
   const turnRate = wrapPI(m.yaw - prevYaw) / dt, spd = st.speed || 0, acc = (spd - m.spd) / dt; m.spd = spd;
   const moving = !st.dead && !st.mounted && !st.roll;
   m.lean = damp(m.lean, moving ? THREE.MathUtils.clamp(-turnRate * spd * 0.018, -0.22, 0.22) : 0, 8, dt);
   m.tilt = damp(m.tilt, moving ? THREE.MathUtils.clamp(acc * 0.012 + spd * 0.012, -0.08, 0.14) : 0, 6, dt);
+  // Impact death: on the frame a character dies, it is thrown away from the shooter (the player)
+  // with momentum that bleeds off over ~0.6 s, plus a little spin, so bodies tumble instead of
+  // dropping on the spot. Presentation only: the 2D corpse stays where the simulation put it.
+  if (st.dead && !m.wasDead && e !== player) {
+    const dx = e.x - player.x, dy = e.y - player.y, d = Math.hypot(dx, dy) || 1;
+    const force = 2.4 + Math.random() * 1.6;                                   // m/s
+    m.kv = new THREE.Vector3(dx / d * force, 0, dy / d * force);
+    m.ko = new THREE.Vector3(); m.kspin = (Math.random() - 0.5) * 3;
+  }
+  m.wasDead = !!st.dead;
+  if (st.dead && m.kv) {
+    m.ko.addScaledVector(m.kv, dt); m.kv.multiplyScalar(Math.exp(-5 * dt));
+    m.yaw += m.kspin * dt; m.kspin *= Math.exp(-4 * dt);
+    r.root.position.add(m.ko);
+  } else if (!st.dead) m.kv = null;
   r.root.rotation.y = m.yaw; r.root.rotation.z = m.lean; r.root.rotation.x = m.tilt;
   poseRig(r, st);
 }

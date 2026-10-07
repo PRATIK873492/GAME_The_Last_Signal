@@ -306,7 +306,9 @@ function buildSkinnedRig(cfg = {}) {
   const guns = { pistol: new THREE.Mesh(G.pistol, gunMat), rifle: new THREE.Mesh(G.rifle, gunMat), pipe: new THREE.Mesh(G.pipe, M('#6a6660', 0.5, 0.7)) };
   const grip = new THREE.Group(); root.add(grip);                      // follows the hand in world space every frame (see poseSkinned)
   for (const g of Object.values(guns)) { g.visible = false; g.castShadow = true; g.rotation.x = -Math.PI / 2; g.position.y = 0.05; grip.add(g); }   // barrel along the fingers
-  const r = { skinned: true, root, body, mixer, act, guns, grip, hand, base: null, oneShot: null, lastCd: 0, deadT: 0, aimK: 0 };
+  const bone = n => body.getObjectByName(n);
+  const r = { skinned: true, root, body, mixer, act, guns, grip, hand, base: null, oneShot: null, lastCd: 0, deadT: 0, aimK: 0,
+    chest: bone('Chest'), head: bone('Head'), hips: bone('Hips'), seed: Math.random() * 100, t: 0 };
   play(r, 'idle', 0); mixer.update(Math.random() * 3);
   return r;
 }
@@ -368,6 +370,16 @@ function poseSkinned(r, st) {
   if (r.oneShot) { r.oneShotT -= dt; if (r.oneShotT <= 0.05) { r.oneShot.fadeOut(0.15); r.oneShot = null; } }
 
   r.mixer.update(dt);
+  // ---- additive layers on top of the clips ----
+  r.t += dt;
+  const calm = (state === 'idle' || state === 'armed') ? 1 : state === 'aim' ? 0.3 : 0.15;
+  const breathe = Math.sin(r.t * (sp > 3 ? 3.2 : 1.6) + r.seed);                       // faster after running
+  if (r.chest) r.chest.rotation.x += breathe * 0.025 * (sp > 3 ? 1.6 : 1);
+  if (r.hips && calm > 0.9) { r.hips.rotation.z += Math.sin(r.t * 0.45 + r.seed) * 0.03; }   // slow weight shift between feet
+  if (r.head && calm > 0.5 && !st.aiming) {                                              // idle: glance around now and then
+    const look = Math.sin(r.t * 0.33 + r.seed) * Math.max(0, Math.sin(r.t * 0.13 + r.seed * 2));
+    r.head.rotation.y += look * 0.5; r.head.rotation.x += Math.sin(r.t * 0.21 + r.seed) * 0.06;
+  }
   if (r.hand) {                                                          // weapon: glue to the right hand
     r.root.updateWorldMatrix(true, true);
     r.hand.getWorldPosition(_hp); r.root.worldToLocal(_hp); r.grip.position.copy(_hp);

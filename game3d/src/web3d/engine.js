@@ -219,8 +219,43 @@ const BEAM_MAT = new THREE.MeshBasicMaterial({ color: '#fff1d0', vertexColors: t
 const headSpot = new THREE.SpotLight('#fff1d6', 0, 45, 0.45, 0.5, 1.6);
 let headSpotAdded = false;
 
+// ---- vehicle FX: pooled puffs (exhaust smoke / wheel dust) + a ring buffer of skid-mark quads ----
+const PUFFS = Array.from({ length: 120 }, () => ({ m: null, life: 0, max: 1, vx: 0, vy: 0, vz: 0, grow: 1 }));
+const puffTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+  const gr = g.createRadialGradient(32, 32, 2, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64); const t = new THREE.CanvasTexture(c); return t; })();
+let puffI = 0, fxInit = false;
+const SKID_N = 400, skidMat = new THREE.MeshBasicMaterial({ color: '#0b0b0b', transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+const skids = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.28, 0.9).rotateX(-Math.PI / 2), skidMat, SKID_N);
+let skidI = 0;
+function initFx() {
+  if (fxInit) return; fxInit = true;
+  for (const p of PUFFS) { p.m = new THREE.Sprite(new THREE.SpriteMaterial({ map: puffTex, color: '#8a8580', transparent: true, opacity: 0, depthWrite: false })); p.m.visible = false; scene.add(p.m); }
+  const hide = new THREE.Matrix4().makeScale(0, 0, 0); for (let i = 0; i < SKID_N; i++) skids.setMatrixAt(i, hide);
+  skids.frustumCulled = false; scene.add(skids);
+}
+function puff(pos, color, size, life, vx, vy, vz, grow) {
+  const p = PUFFS[puffI++ % PUFFS.length];
+  p.m.position.copy(pos); p.m.material.color.set(color); p.m.scale.setScalar(size); p.m.visible = true;
+  Object.assign(p, { life, max: life, vx, vy, vz, grow });
+}
+function skid(x, z, yaw) {
+  skids.setMatrixAt(skidI++ % SKID_N, new THREE.Matrix4().compose(new THREE.Vector3(x, 0.03, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0)), new THREE.Vector3(1, 1, 1)));
+  skids.instanceMatrix.needsUpdate = true;
+}
+function updateFx(dt) {
+  for (const p of PUFFS) {
+    if (p.life <= 0) continue;
+    p.life -= dt; const k = Math.max(0, p.life / p.max);
+    p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt;
+    p.m.scale.multiplyScalar(1 + p.grow * dt); p.m.material.opacity = 0.35 * k;
+    if (p.life <= 0) p.m.visible = false;
+  }
+}
+
 function drawEntities(dt, camMap) {
   used.clear();
+  initFx(); updateFx(dt);
   if (!headSpotAdded) { scene.add(headSpot, headSpot.target); headSpotAdded = true; }
   headSpot.visible = false;
   const near = (e, r = 550) => Math.abs(e.x - camMap.x) < r && Math.abs(e.y - camMap.y) < r;
@@ -275,6 +310,29 @@ function drawEntities(dt, camMap) {
       const bounce = boat ? 0 : Math.sin(m.ph) * Math.min(1, Math.abs(sp) / 20) * 0.012;
       v.g.rotation.y = heading(c.a); v.g.rotation.x = m.pitch + (boat ? Math.sin(performance.now() / 900 + c.x) * 0.03 : 0); v.g.rotation.z = m.roll;
       v.g.position.y += bounce + Math.abs(m.roll) * 0.05;
+      // exhaust, dust and skid marks for vehicles that are actually being driven
+      const driven = (c === player.car || c.lit || c.scripted || c.id) && c.hp > 0 && !boat;
+      if (driven) {
+        const yaw = heading(c.a), back = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)).multiplyScalar(-T.h * S * 0.5);
+        const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).multiplyScalar(T.w * S * 0.4);
+        m.ex = (m.ex || 0) - dt;
+        if (m.ex <= 0) {                                            // exhaust: more when accelerating
+          m.ex = acc > 2 ? 0.04 : 0.12;
+          const p = v.g.position.clone().add(back).add(new THREE.Vector3(0, 0.45, 0)).addScaledVector(side, 0.6);
+          puff(p, acc > 2 ? '#4a4744' : '#8c8883', 0.35, 1.4, back.x * 0.1, 0.5, back.z * 0.1, 1.2);
+        }
+        if (Math.abs(sp) > 9 && Math.random() < dt * 25) {          // dust kicked up behind the rear wheels
+          for (const s of bike ? [0] : [-1, 1]) {
+            const p = v.g.position.clone().add(back).addScaledVector(side, s).add(new THREE.Vector3(0, 0.25, 0));
+            puff(p, '#9a8f7d', 0.6, 1.8, back.x * 0.3 + (Math.random() - 0.5), 0.35, back.z * 0.3 + (Math.random() - 0.5), 1.6);
+          }
+        }
+        // skid marks: hard braking / launching, or sliding through a fast corner
+        if ((Math.abs(acc) > 14 || Math.abs(yawRate * sp) > 14) && Math.abs(sp) > 4) {
+          m.sk = (m.sk || 0) - dt;
+          if (m.sk <= 0) { m.sk = 0.03; for (const s of bike ? [0] : [-1, 1]) { const q = v.g.position.clone().add(back).addScaledVector(side, s); skid(q.x, q.z, yaw); } }
+        }
+      }
     }
     if (c.jump > 0) { v.g.position.y += Math.sin(Math.min(1, c.jump) * Math.PI) * 2; c.jump = Math.max(0, c.jump - dt); }
     v.spin += (c.v || 0) * S * dt * 2; for (const w of v.wheels) w.rotation.x = v.spin;

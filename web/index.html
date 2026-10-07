@@ -271,16 +271,16 @@ body.mode3d #crosshair{left:50%!important;top:50%!important}
   window.GAME_3D = !/[?&]2d/.test(location.search);
   if (!window.GAME_3D) document.getElementById('view3d').remove();
 </script>
-<script src="gametheory.js?v=20"></script>
-<script src="characters.js?v=20"></script>
-<script src="game.js?v=20"></script>
-<script src="action.js?v=20"></script>
-<script src="missions.js?v=20"></script>
-<script src="chapter1.js?v=20"></script>
-<script src="chapter2.js?v=20"></script>
-<script src="chapter3.js?v=20"></script>
-<script src="chapter4.js?v=20"></script>
-<script src="chapter5.js?v=20"></script>
-<script src="chapter6.js?v=20"></script>
-<script src="chapter7.js?v=20"></script>
+<script src="gametheory.js?v=21"></script>
+<script src="characters.js?v=21"></script>
+<script src="game.js?v=21"></script>
+<script src="action.js?v=21"></script>
+<script src="missions.js?v=21"></script>
+<script src="chapter1.js?v=21"></script>
+<script src="chapter2.js?v=21"></script>
+<script src="chapter3.js?v=21"></script>
+<script src="chapter4.js?v=21"></script>
+<script src="chapter5.js?v=21"></script>
+<script src="chapter6.js?v=21"></script>
+<script src="chapter7.js?v=21"></script>
 <script type="module">if (window.GAME_3D) import('./engine/engine.js?v=' + Date.now()).catch(e => { console.error(e); alert('3D engine failed to load: ' + e.message + '. Open with ?2d for the classic view.'); });</script>

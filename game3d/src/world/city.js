@@ -72,23 +72,76 @@ export function facadeMaterial() {
   m.onBeforeCompile = sh => {
     sh.uniforms.uWet = wetU;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vLsPos; varying vec3 vLsNrm;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vLsPos; varying vec3 vLsNrm; varying vec3 vLsBld;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         vec4 lsW = vec4(transformed, 1.0);
         vec3 lsN = objectNormal;
         #ifdef USE_INSTANCING
           lsW = instanceMatrix * lsW; lsN = mat3(instanceMatrix) * lsN;
         #endif
-        vLsPos = (modelMatrix * lsW).xyz; vLsNrm = normalize(lsN);`);
+        vLsPos = (modelMatrix * lsW).xyz; vLsNrm = normalize(lsN);
+        vLsBld = vec3(0.0);
+        #ifdef USE_INSTANCING
+          vLsBld = instanceMatrix[3].xyz;
+        #endif`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        varying vec3 vLsPos; varying vec3 vLsNrm; uniform float uWet;
+        varying vec3 vLsPos; varying vec3 vLsNrm; varying vec3 vLsBld; uniform float uWet;
+        float lsHgt;   // surface relief (0 = wall face, negative = grooves / recesses), turned into a bumped normal below
         float fHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float fNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
           return mix(mix(fHash(i), fHash(i + vec2(1, 0)), f.x), mix(fHash(i + vec2(0, 1)), fHash(i + vec2(1, 1)), f.x), f.y); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
-        float lsWin = 0.0;
+        float lsWin = 0.0; lsHgt = 0.0;
         diffuseColor.rgb *= mix(1.0, 0.72, uWet);                        // rain-soaked walls go darker
+        // ---- wall MATERIAL per building: brick, precast concrete panels, or cracked plaster ----
+        float bType = fract(sin(dot(floor(vLsBld.xz), vec2(17.13, 91.7))) * 4375.85);
+        {
+          vec3 wn = normalize(vLsNrm);
+          if (abs(wn.y) < 0.5) {
+            float wu = abs(wn.x) > 0.5 ? vLsPos.z : vLsPos.x, wy = vLsPos.y;
+            if (bType < 0.42) {
+              // BRICK: 0.5 x 0.22 m courses, every other course offset half a brick, recessed mortar joints
+              vec2 bc = vec2(wu / 0.5 + 0.5 * step(0.5, fract(wy / 0.44)), wy / 0.22);
+              vec2 bf = fract(bc), bid = floor(bc);
+              float mortar = 1.0 - step(0.06, bf.x) * step(bf.x, 0.94) * step(0.1, bf.y) * step(bf.y, 0.9);
+              float bh = fHash(bid);
+              vec3 brick = mix(vec3(0.55, 0.26, 0.18), vec3(0.42, 0.22, 0.17), bh) * (0.85 + 0.3 * fNoise(bc * 3.0));
+              brick = mix(brick, vec3(0.3, 0.27, 0.25), step(0.93, bh) * 0.7);      // the odd burnt brick
+              diffuseColor.rgb = mix(brick * 1.4, vec3(0.62, 0.6, 0.55), mortar) * mix(vec3(1.0), diffuseColor.rgb * 1.5, 0.25);
+              lsHgt = -mortar * 0.6 + (fNoise(bc * 6.0) - 0.5) * 0.15;
+            } else if (bType < 0.75) {
+              // PRECAST CONCRETE: 3.1 x 3.4 m panels with deep seams, bug-holes and formwork marks
+              vec2 pc = vec2(wu / 3.1, wy / 3.4), pf = fract(pc);
+              float seam = 1.0 - step(0.012, pf.x) * step(pf.x, 0.988) * step(0.012, pf.y) * step(pf.y, 0.988);
+              float pores = step(0.93, fHash(floor(vec2(wu, wy) * 14.0)));
+              diffuseColor.rgb *= (0.9 + 0.2 * fNoise(vec2(wu, wy) * 1.3)) * (1.0 - 0.45 * seam) * (1.0 - 0.25 * pores);
+              diffuseColor.rgb *= 1.0 - 0.06 * step(0.5, fract(wy * 1.2));          // horizontal formwork boards
+              lsHgt = -seam * 0.9 - pores * 0.3;
+            } else {
+              // PLASTER: rough render; where it has fallen off, brick shows through
+              float rough = fNoise(vec2(wu, wy) * 9.0);
+              float spall = smoothstep(0.66, 0.68, fNoise(vec2(wu, wy) * 0.8 + bType * 30.0) + 0.12 * fNoise(vec2(wu, wy) * 12.0));
+              vec2 bc = vec2(wu / 0.5 + 0.5 * step(0.5, fract(wy / 0.44)), wy / 0.22);
+              vec3 under = mix(vec3(0.5, 0.25, 0.18), vec3(0.6, 0.58, 0.52), 1.0 - step(0.08, fract(bc.x)) * step(0.12, fract(bc.y)));
+              diffuseColor.rgb = mix(diffuseColor.rgb * (0.92 + 0.16 * rough), under, spall);
+              lsHgt = (rough - 0.5) * 0.25 - spall * 0.5;
+            }
+            // ---- GRAFFITI: spray-paint tags (squiggly iso-lines of noise) on about half the ground floors ----
+            if (wy < 2.6 && fract(bType * 7.7) < 0.5) {
+              float seg = floor(wu / 5.0), on = step(0.35, fHash(vec2(seg, bType)));
+              float box = smoothstep(0.4, 0.9, wy) * smoothstep(2.4, 1.9, wy) * smoothstep(0.0, 0.6, fract(wu / 5.0)) * smoothstep(1.0, 0.75, fract(wu / 5.0));
+              float n1 = fNoise(vec2(wu * 2.6, wy * 3.4) + seg * 13.0) + 0.35 * fNoise(vec2(wu, wy) * 9.0 + seg);
+              float stroke = 1.0 - smoothstep(0.0, 0.045, abs(n1 - 0.68));
+              float fillT = smoothstep(0.7, 0.74, n1) * step(0.6, fHash(vec2(seg, 5.0)));
+              vec3 gc = mix(vec3(0.75, 0.12, 0.1), vec3(0.1, 0.35, 0.7), step(0.5, fHash(vec2(seg, 3.0))));
+              gc = mix(gc, vec3(0.9, 0.85, 0.75), step(0.8, fHash(vec2(seg, 4.0))));
+              float k = on * box;
+              diffuseColor.rgb = mix(diffuseColor.rgb, gc * 0.7, fillT * k * 0.85);
+              diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.02), stroke * k * 0.9);
+            }
+          }
+        }
         vec3 n = normalize(vLsNrm);
         if (abs(n.y) < 0.5) {
           float u = abs(n.x) > 0.5 ? vLsPos.z : vLsPos.x;
@@ -98,6 +151,7 @@ export function facadeMaterial() {
           float h = fract(sin(dot(id, vec2(12.9898, 78.233))) * 43758.5453);
           float inWin = step(0.2, cell.x) * step(cell.x, 0.8) * step(0.28, cell.y) * step(cell.y, 0.82) * step(3.4, fy);
           lsWin = inWin * step(0.12, h);                              // ~12% of windows boarded up
+          lsHgt = mix(lsHgt, -1.2, inWin);                             // window openings sit deep in the wall
           vec3 glass = mix(vec3(0.03, 0.035, 0.04), vec3(0.16, 0.19, 0.21), h * h);
           diffuseColor.rgb = mix(diffuseColor.rgb, glass, lsWin);
           diffuseColor.rgb *= 1.0 - 0.2 * step(fract(fy / 3.4), 0.07); // floor slab lines
@@ -126,6 +180,15 @@ export function facadeMaterial() {
           lsWin *= 1.0 - broken * step(0.45, shard);                    // holes are not shiny
         } else {
           diffuseColor.rgb *= 0.62;                                     // flat roofs are darker
+        }`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          vec3 dpx = dFdx(-vViewPosition), dpy = dFdy(-vViewPosition);
+          float dhx = dFdx(lsHgt) * 0.06, dhy = dFdy(lsHgt) * 0.06;
+          vec3 r1 = cross(dpy, normal), r2 = cross(normal, dpx);
+          float det = dot(dpx, r1);
+          vec3 grad = sign(det) * (dhx * r1 + dhy * r2);
+          normal = normalize(abs(det) * normal - grad);
         }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
         roughnessFactor = mix(roughnessFactor, 0.18, lsWin);
@@ -168,11 +231,32 @@ export function buildCity(scene, layout) {
         float lsWear = smoothstep(0.35, 0.75, lsNoise(vGW.xz * 0.35 + 7.0));
         diffuseColor.rgb *= 0.78 + 0.4 * lsGrit;
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.08, 1.02, 0.92), lsWear * 0.5);
+        // CRACKS: edges of a 2.5 m Voronoi pattern, only where the ground is worn
+        vec2 cg = vGW.xz / 2.5, ci = floor(cg), cf = fract(cg);
+        float d1 = 8.0, d2 = 8.0;
+        for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+          vec2 o = vec2(float(i), float(j)), pt = vec2(lsHash(ci + o), lsHash(ci + o + 19.1));
+          float d = length(o + pt - cf); if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+        }
+        float lsCrack = (1.0 - smoothstep(0.0, 0.035, d2 - d1)) * smoothstep(0.45, 0.7, lsNoise(vGW.xz * 0.07 + 3.0));
+        diffuseColor.rgb *= 1.0 - 0.75 * lsCrack;
+        // OIL STAINS: dark glossy blots
+        float lsOil = smoothstep(0.78, 0.82, lsNoise(vGW.xz * 0.45 + 31.0)) * step(0.6, lsNoise(vGW.xz * 0.05));
+        diffuseColor.rgb *= 1.0 - 0.6 * lsOil;
+        // TYRE MARKS: long thin streaks along both road axes, in patches
+        float tmx = smoothstep(0.92, 1.0, lsNoise(vec2(vGW.x * 0.08, vGW.z * 3.0))) * smoothstep(0.6, 0.75, lsNoise(vGW.xz * 0.04 + 9.0));
+        float tmz = smoothstep(0.92, 1.0, lsNoise(vec2(vGW.x * 3.0, vGW.z * 0.08))) * smoothstep(0.6, 0.75, lsNoise(vGW.xz * 0.04 + 51.0));
+        diffuseColor.rgb *= 1.0 - 0.45 * max(tmx, tmz);
+        // LITTER: scattered paper, cans and glass bits
+        vec2 lc = floor(vGW.xz * 3.0); float lh = lsHash(lc + 7.7);
+        float lsLit = step(0.993, lh) * step(0.25, length(fract(vGW.xz * 3.0) - 0.5) < 0.3 ? 1.0 : 0.0);
+        diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.8, 0.78, 0.7), vec3(0.6, 0.15, 0.1), step(0.997, lh)), lsLit);
         float lsPuddle = smoothstep(0.56, 0.6, n) * smoothstep(0.15, 0.6, uWet);
         diffuseColor.rgb *= mix(1.0, 0.6, uWet);
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.4, lsPuddle);`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
         roughnessFactor = clamp(roughnessFactor - 0.12 * lsGrit + 0.06, 0.6, 1.0);
+        roughnessFactor = mix(roughnessFactor, 0.25, lsOil);
         roughnessFactor = mix(roughnessFactor, 0.45, uWet);
         roughnessFactor = mix(roughnessFactor, 0.02, lsPuddle);`);
   };

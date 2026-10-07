@@ -264,6 +264,24 @@ export function buildDetails(scene, layout, box, pool) {
   const headMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.55, 0.18, 0.3), new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 3, 3) }), heads.length);   // HDR so working lamps bloom
   heads.forEach((h, i) => { headMesh.setMatrixAt(i, mat(h.x, 6.85, h.z)); headMesh.setColorAt(i, new THREE.Color(h.powered ? '#ffd9a0' : '#3a3c3e')); });
   group.add(headMesh);
+  // Visible light beams under the working lamps (additive cones, faded in at night)
+  const beamMat = new THREE.MeshBasicMaterial({ color: '#ffcf8a', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  const beamGeo = new THREE.ConeGeometry(3.2, 6.7, 24, 1, true).translate(0, -3.35, 0);
+  {
+    const vy = beamGeo.attributes.position, col = new Float32Array(vy.count * 3);
+    for (let i = 0; i < vy.count; i++) { const k = Math.pow(1 + vy.getY(i) / 6.7, 1.6); col.set([k, k, k], i * 3); }   // brightest at the lamp
+    beamGeo.setAttribute('color', new THREE.BufferAttribute(col, 3)); beamMat.vertexColors = true;
+  }
+  const lit = heads.filter(h => h.powered);
+  const beams = new THREE.InstancedMesh(beamGeo, beamMat, Math.max(1, lit.length));
+  lit.forEach((h, i) => beams.setMatrixAt(i, mat(h.x, 6.75, h.z)));
+  beams.count = lit.length; beams.renderOrder = 2; group.add(beams);
+  // Dust motes floating in the air around the camera (catch the light by day)
+  const DUST = 700, dustPos = new Float32Array(DUST * 3);
+  for (let i = 0; i < DUST; i++) dustPos.set([(Math.random() - 0.5) * 30, Math.random() * 8, (Math.random() - 0.5) * 30], i * 3);
+  const dustGeo = new THREE.BufferGeometry(); dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+  const dustMat = new THREE.PointsMaterial({ color: '#fff3dc', size: 0.045, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending });
+  const dust = new THREE.Points(dustGeo, dustMat); dust.frustumCulled = false; group.add(dust);
   const poweredHeads = heads.map((h, i) => [h, i]).filter(([h]) => h.powered)
     .map(([h, i]) => ({ i, src: pool.sources.find(s => Math.abs(s.pos.x - h.x) < 0.01 && Math.abs(s.pos.z - h.z) < 0.01) }));
 
@@ -322,7 +340,19 @@ export function buildDetails(scene, layout, box, pool) {
 
   return {
     group,
-    update(t, dt, camPos, wind = 1) {
+    update(t, dt, camPos, wind = 1, night = 0) {
+      beamMat.opacity = 0.06 * night;
+      beams.visible = night > 0.05;
+      // dust drifts with the wind and wraps around the camera
+      const dp = dustGeo.attributes.position;
+      for (let i = 0; i < DUST; i++) {
+        let x = dp.getX(i) + (0.35 * wind + Math.sin(t * 0.5 + i) * 0.1) * dt, y = dp.getY(i) + Math.sin(t * 0.8 + i * 1.3) * 0.08 * dt, z = dp.getZ(i) + Math.cos(t * 0.4 + i) * 0.1 * dt;
+        if (x - camPos.x > 15) x -= 30; if (x - camPos.x < -15) x += 30; if (z - camPos.z > 15) z -= 30; if (z - camPos.z < -15) z += 30;
+        if (y < 0) y += 8; if (y > 8) y -= 8;
+        dp.setXYZ(i, x, y, z);
+      }
+      dp.needsUpdate = true;
+      dustMat.opacity = 0.25 + 0.35 * (1 - night);
       // lamp heads blink with their light (broken lamps flicker)
       for (const { i, src } of poweredHeads) if (src) headMesh.setColorAt(i, new THREE.Color(pool.flicker(src, t) > 0.5 ? '#ffd9a0' : '#4a4035'));
       if (headMesh.instanceColor) headMesh.instanceColor.needsUpdate = true;

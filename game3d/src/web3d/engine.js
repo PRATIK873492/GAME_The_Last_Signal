@@ -208,8 +208,21 @@ function drawPerson(e, cfg, st, pos) {
 const leaderList = [['elena', 'P.elena'], ['rhea', 'P.rhea'], ['silas', 'P.silas']];
 const leaderEnts = leaderList.map(([id]) => ({ id, x: 0, y: 0, a: 0 }));
 
+// shared headlight beam (a long cone pointing along +z, brightest at the lamp) and one real spotlight for the player's car
+const BEAM_GEO = (() => {
+  const g = new THREE.ConeGeometry(1.8, 13, 24, 6, true).rotateX(-Math.PI / 2).translate(0, 0, 6.5).rotateX(0.06);   // tipped down onto the road
+  const p = g.attributes.position, c = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) { const k = Math.pow(Math.max(0, 1 - p.getZ(i) / 13), 2.6); c.set([k, k, k], i * 3); }
+  g.setAttribute('color', new THREE.BufferAttribute(c, 3)); return g;
+})();
+const BEAM_MAT = new THREE.MeshBasicMaterial({ color: '#fff1d0', vertexColors: true, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+const headSpot = new THREE.SpotLight('#fff1d6', 0, 45, 0.45, 0.5, 1.6);
+let headSpotAdded = false;
+
 function drawEntities(dt, camMap) {
   used.clear();
+  if (!headSpotAdded) { scene.add(headSpot, headSpot.target); headSpotAdded = true; }
+  headSpot.visible = false;
   const near = (e, r = 550) => Math.abs(e.x - camMap.x) < r && Math.abs(e.y - camMap.y) < r;
   const st = (e, extra) => Object.assign({ dt, speed: (e.spd || 0) * S, aiming: !!e.aiming, weapon: e.weaponName, swing: e.swing || 0, hit: e.hitT || 0, cd: e.cd || 0, dead: !!e.dead, armed: !!e.weaponName && e.weaponName !== 'none' }, extra);
   // player (standing on the turret jeep, or hidden while driving)
@@ -266,6 +279,28 @@ function drawEntities(dt, camMap) {
     if (c.jump > 0) { v.g.position.y += Math.sin(Math.min(1, c.jump) * Math.PI) * 2; c.jump = Math.max(0, c.jump - dt); }
     v.spin += (c.v || 0) * S * dt * 2; for (const w of v.wheels) w.rotation.x = v.spin;
     if (c.hp <= 0) wreckVehicle(v);
+    // Headlight beams: driven vehicles at night get two visible light cones + (player only) a real spotlight
+    {
+      const driven = c === player.car || c.lit || c.scripted || c.id;
+      const night = 1 - lighting.state.daylight;
+      if (driven && c.hp > 0 && night > 0.1 && c.type !== 'boat') {
+        if (!v.beams) {
+          v.beams = new THREE.Group();
+          for (const s of (c.type === 'bike' ? [0] : [-1, 1])) {
+            const b = new THREE.Mesh(BEAM_GEO, BEAM_MAT); b.position.set(s * T.w * S * 0.32, 0.75, T.h * S * 0.5); v.beams.add(b);
+          }
+          v.g.add(v.beams);
+        }
+        v.beams.visible = true;
+        BEAM_MAT.opacity = 0.055 * night;
+        if (c === player.car) {
+          headSpot.visible = true; headSpot.intensity = 60 * night;
+          headSpot.position.copy(v.g.position).add(new THREE.Vector3(0, 1, 0));
+          const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(v.g.quaternion);
+          headSpot.target.position.copy(v.g.position).addScaledVector(fwd, 20);
+        }
+      } else if (v.beams) v.beams.visible = false;
+    }
     v.gun.visible = !!c.turret;
     if (c.turret && player.gunner && player.gunner.car === c) v.gun.rotation.y = heading(player.a) - heading(c.a);
     // a rider sits on a bike actor in cutscenes
@@ -471,7 +506,7 @@ window.R3 = {
     updateNightLights();
     windUniform.value = t;
     city.water.update(t, GT.river / 100, GT.riverDead);
-    details.update(t, dt, camera.position, 1 + wx.fogMul * 0.1);
+    details.update(t, dt, camera.position, 1 + wx.fogMul * 0.1, 1 - lighting.state.daylight);
     districts.update(t, GT.riverDead);
     for (const f of city.fires) f.flame.scale.y = 0.8 + 0.25 * Math.sin(t * 13 + f.seed) * Math.sin(t * 7.3 + f.seed * 2);
     lodTimer -= dt; if (lodTimer <= 0) { lodTimer = 0.25; updateLOD(camera.position, preset.detailDist); }

@@ -137,10 +137,17 @@ export function buildCity(scene, layout) {
           return mix(mix(lsHash(i), lsHash(i + vec2(1, 0)), f.x), mix(lsHash(i + vec2(0, 1)), lsHash(i + vec2(1, 1)), f.x), f.y); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         float n = lsNoise(vGW.xz * 0.12) * 0.65 + lsNoise(vGW.xz * 0.6) * 0.35;
+        // close-up surface detail: the painted ground is ~8 px per metre, so near the camera it
+        // looks like flat plastic. Layered noise adds grit, patches of wear and fine speckle.
+        float lsGrit = lsNoise(vGW.xz * 3.1) * 0.5 + lsNoise(vGW.xz * 11.0) * 0.3 + lsHash(floor(vGW.xz * 40.0)) * 0.2;
+        float lsWear = smoothstep(0.35, 0.75, lsNoise(vGW.xz * 0.35 + 7.0));
+        diffuseColor.rgb *= 0.78 + 0.4 * lsGrit;
+        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.08, 1.02, 0.92), lsWear * 0.5);
         float lsPuddle = smoothstep(0.56, 0.6, n) * smoothstep(0.15, 0.6, uWet);
         diffuseColor.rgb *= mix(1.0, 0.6, uWet);
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.4, lsPuddle);`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = clamp(roughnessFactor - 0.12 * lsGrit + 0.06, 0.6, 1.0);
         roughnessFactor = mix(roughnessFactor, 0.45, uWet);
         roughnessFactor = mix(roughnessFactor, 0.02, lsPuddle);`);
   };

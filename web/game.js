@@ -374,6 +374,7 @@ addEventListener('keydown', e => {
   if (!$('decision').hidden && ['1', '2', '3'].includes(e.key)) { const b = $('dec-cards').children[+e.key - 1]; if (b && !b.disabled) b.click(); return; }
   if (e.key === 'Escape') { if (state.running) togglePause(); return; }
   if ((e.key === 'j' || e.key === 'J') && state.running && !state.modal) { openCodex(); return; }
+  if ((e.key === 'h' || e.key === 'H') && state.running && !state.modal && Mission.started) { showBriefing(Mission.ch, () => {}); return; }
   keys[e.code] = true;
   if (Action.keydown(e)) { e.preventDefault(); return; }       // Part A: E, Q, Ctrl, F, V, C, G, B, T and QTE keys
   if (!state.running || state.modal) return;
@@ -928,7 +929,7 @@ const Mission = {
     saveGame();
     const c = CHAPTERS[ch];
     $('hud-chapter').textContent = c.label;
-    chapterCard(c.label, c.title, c.sub, () => this.next());
+    chapterCard(c.label, c.title, c.sub, () => showBriefing(ch, () => this.next()));
   },
   next() {
     this.i++;
@@ -1232,20 +1233,25 @@ function bayesScreen(done) {
     const grimFired = GT.col[c].strat === 'grim' && GT.col[c].hist.some(r => r.p === D);
     const prior = grimFired ? 0.9 : clamp(0.9 * (1 - trustOf(c) / 100), 0.02, 0.95);
     const accepted = Math.random() < prior;
-    const evidence = accepted ? Math.random() < L1 : Math.random() < L0;
-    const post = evidence ? prior * L1 / (prior * L1 + (1 - prior) * L0) : prior * (1 - L1) / (prior * (1 - L1) + (1 - prior) * (1 - L0));
-    return { c, prior, accepted, evidence, post };
+    // one intercept per relay tower: the belief is updated three times, once per clue
+    const upd = (b, sus) => sus ? b * L1 / (b * L1 + (1 - b) * L0) : b * (1 - L1) / (b * (1 - L1) + (1 - b) * (1 - L0));
+    const clues = [0, 1, 2].map(() => Math.random() < (accepted ? L1 : L0));
+    const steps = []; let b = prior; for (const sus of clues) { b = upd(b, sus); steps.push(b); }
+    const post = b, evidence = post >= 0.5;          // the player acts on what the evidence says
+    return { c, prior, accepted, clues, steps, evidence, post };
   });
   unlock('bayes');
+  const cell = (sus, v) => `<td><span class="${sus ? 'bad' : 'good'}">${sus ? 'Suspicious' : 'Clean'}</span> → <b>${v.toFixed(2)}</b></td>`;
   const html = `<div class="eyebrow">Chapter 6 · Incomplete information</div><h2>Who took the bribe?</h2>
-    <p>You can’t see the truth, only intercepted traffic. Start with a prior belief (from each colony’s trust and history), then update it with Bayes’ rule. The intercept flags a colony that took the bribe 80% of the time, and one that refused 30% of the time.</p>
-    <div class="matrix-wrap"><table class="data"><tr><th>Colony</th><th>Prior P(bribed)</th><th>Intercept</th><th>Posterior</th></tr>
-    ${rows.map(r => `<tr><td>${COLONY_INFO[r.c].name}</td><td>${r.prior.toFixed(2)}</td><td class="${r.evidence ? 'bad' : 'good'}">${r.evidence ? 'Suspicious' : 'Clean'}</td><td><b>${r.post.toFixed(2)}</b></td></tr>`).join('')}
+    <p><b>In simple words:</b> you can’t see who said yes to Kane. Each tower gave you one clue about each colony. A suspicious clue pushes your belief up, a clean one pushes it down. None of them is proof on its own.</p>
+    <p>A colony that took the bribe looks suspicious 80% of the time; an honest one, 30% of the time. Your starting belief comes from each colony’s trust and history.</p>
+    <div class="matrix-wrap"><table class="data"><tr><th>Colony</th><th>Start</th><th>Tower 1</th><th>Tower 2</th><th>Tower 3</th><th>Verdict</th></tr>
+    ${rows.map(r => `<tr><td>${COLONY_INFO[r.c].name}</td><td>${r.prior.toFixed(2)}</td>${r.clues.map((sus, k) => cell(sus, r.steps[k])).join('')}<td class="${r.evidence ? 'bad' : 'good'}">${r.evidence ? 'Probably bribed' : 'Probably loyal'}</td></tr>`).join('')}
     </table></div>
-    <p class="mono" style="font-size:12px;color:var(--mute)">Posterior = P(E|bribed)·P(bribed) / P(E). A suspicious intercept raises the belief, and a clean one lowers it without ruling anything out.</p>`;
+    <p class="mono" style="font-size:12px;color:var(--mute)">Bayes’ rule, once per tower: P(bribed | clue) = P(clue | bribed)·P(bribed) / P(clue). Example from 0.50: one suspicious clue → 0.73, two → 0.88, three → 0.95.</p>`;
   panel(html, 'Decide what to broadcast', () => {
     decision({ eyebrow: 'Chapter 6 · Signaling', title: 'What do you tell the city?', prompt: 'Your message will shape what every colony believes about the others and about you.',
-      cards: [{ k: 'Honest signal', t: 'Broadcast the intercepts', s: 'Share everything. Suspicious colonies are exposed.' },
+      cards: [{ k: 'Honest signal', t: 'Broadcast the intercepts', s: 'Share everything. Colonies your evidence points to (belief 0.50 or more) are exposed.' },
               { k: 'False signal', t: 'Forge a message', s: 'Frame the others and look like the only loyal colony. Lakeside gains +40, if nobody catches the lie.' }], timeout: 1 },
       i => {
         const out = [];
@@ -1387,10 +1393,58 @@ function matrixHTML(mKey, r, oppName, note) {
     ${r ? `<h3>You: ${labels[r.p]} · ${oppName}: ${labels[r.a]} → you ${r.pp}, them ${r.ap}</h3>` : ''}
     <div class="matrix-wrap"><div class="matrix">${cells}</div></div>
     <div class="legend"><span><span class="tag you">Result</span> what happened</span><span><span class="tag nash">Nash</span> no one gains by switching alone</span><span><span class="tag pareto">Pareto</span> can’t improve one side without hurting the other</span></div>
-    <p>${m.explain}</p>
+    ${PLAIN[mKey] ? `<p class="plain"><b>In simple words:</b> ${PLAIN[mKey]}</p>` : ''}
     ${note ? `<p style="color:var(--text)">${note}</p>` : ''}
-    <div class="facts">${facts}</div>`;
+    <details class="more"><summary>Show the game theory</summary><p>${m.explain}</p><div class="facts">${facts}</div></details>`;
 }
+// ---- Chapter briefings: the story in plain words before each chapter ----
+// Shown after the title card (and again at any time with H) so the player always knows
+// who is who, what they are doing, and what the big choice at the end of the chapter is about.
+const BRIEFS = [
+  { story: 'It is 2041. Eighteen months ago the power grid of Solace City died, and the city split into four colonies that do not trust each other: <b>Lakeside</b> (your home, has water), <b>Mercy Hospital</b> (medicine), <b>Ironside Refinery</b> (fuel) and <b>Crow’s Market</b> (food). You are <b>Veer</b>, a former power-station engineer. An old radio has started repeating a strange signal.',
+    goal: 'Protect Lakeside from Razor’s scavengers, save the water tanks, and get the radio back if they steal it.',
+    choice: 'No big choice yet. Learn to move, fight and take cover. At the end you will find out what the signal means.' },
+  { story: 'The signal said the blackout was caused by a company called <b>Helix</b>, and that the grid can restart only if <b>all four colonies</b> feed power together. So you need friends. Lakeside has water; Mercy Hospital has medicine.',
+    goal: 'Escort a water truck to Mercy Hospital, help Dr. Elena Cruz fight off snipers, then trade with her.',
+    choice: '<b>Honest trade or cheat?</b> You and Elena each send a sealed crate. Cheating gives you more today, but Elena will remember it. Hint: Elena is generous and starts by trusting you.' },
+  { story: 'Fuel is the next piece. Rhea “Iron” Dutta runs Ironside Refinery. She is tough and fair, and she <b>never forgives a betrayal</b>.',
+    goal: 'Save Rhea’s workers from a refinery fire, then escort her fuel tanker home. After that, do several jobs with her.',
+    choice: '<b>Keep your word or skim a bit?</b> You will deal with Rhea five times. One cheat and she treats you as an enemy for the rest of the game. Being honest every time pays the most in the long run.' },
+  { story: 'Helix is dumping poison into the river that every colony drinks from. The river heals a little every day, but only if nobody takes too much.',
+    goal: 'Chase the Helix barge by boat, then sneak into their pump station and blow it up. Then meet all four leaders.',
+    choice: '<b>How much water do you take?</b> Taking a lot helps you now, but if everyone does it the river dies for good. Watch the river health bar at the top right and take a small or medium amount.' },
+  { story: 'Silas Crow controls the market and the only bridge across the river. He wants to see who backs down first.',
+    goal: 'Catch the thief who stole Lakeside’s pump part, then drive your convoy onto the bridge, head-on with Silas.',
+    choice: '<b>Swerve or stay on the road?</b> If one side swerves, the other wins. If both stay, both crash. Silas decides based on your reputation: if you have been tough before, he is more likely to swerve.' },
+  { story: 'The grid needs a generator core, and Helix is guarding one at a depot in the Dead Zone. You cannot carry it out alone.',
+    goal: 'Pick one leader as your partner, sneak into the depot together, and clear the drones guarding the vault.',
+    choice: '<b>Carry the core together, or grab the supply crates?</b> The core is the big prize, but only if your partner commits too. They will only trust you if their trust meter is 60 or more.' },
+  { story: 'Director Kane of Helix has secretly offered every colony a bribe to sabotage the restart. Nobody knows who said yes.',
+    goal: 'Hack three radio relay towers to listen in on the colonies.',
+    choice: '<b>Who took the bribe, and what do you tell the city?</b> Use the clues you intercepted to guess who is lying. Then decide whether to tell the truth or bluff.' },
+  { story: 'This is it. Everyone meets at the power station. Helix will throw everything they have at you, and Razor is back on their side.',
+    goal: 'Get to the power station, defend the control room, and defeat Razor.',
+    choice: '<b>Restart the grid.</b> Every colony gives some power; the city needs 280 in total. Colonies that trust you give more. Everything you did in earlier chapters decides the ending.' },
+];
+function showBriefing(ch, done) {
+  const b = BRIEFS[ch], c = CHAPTERS[ch];
+  if (!b) { done(); return; }
+  panel(`<div class="eyebrow">${c.label} · Briefing</div><h2>${c.title}</h2>
+    <div class="brief"><div><span class="bk">The story so far</span><p>${b.story}</p></div>
+    <div><span class="bk">Your goal</span><p>${b.goal}</p></div>
+    <div><span class="bk">The big choice</span><p>${b.choice}</p></div></div>
+    <p class="mono" style="font-size:12px;color:var(--mute)">Follow the amber arrow and the objective at the top right. Press H at any time to read this briefing again.</p>`,
+    'Start', done);
+}
+
+// Plain-language summary for each game, shown at the top of the result screen.
+const PLAIN = {
+  PD_OneShot: 'Cheating pays more for whoever does it, but if you both cheat you both end up worse off than if you had both been honest.',
+  PD_Repeated: 'You will meet again. Cheating wins a little today but costs you a partner for every future deal.',
+  Chicken: 'Someone has to back down. If nobody does, both lose badly.',
+  StagHunt: 'Working together pays the most, but only if you can trust your partner to commit.',
+  Pennies: 'There is no safe move: being unpredictable is the best strategy.',
+};
 function showMatrix(mKey, r, oppName, note, done) {
   panel(matrixHTML(mKey, r, oppName, note), 'Continue', done);
 }
@@ -1688,7 +1742,7 @@ $('btn-demo').onclick = () => newGame(true);
 $('btn-controls').onclick = () => {
   $('menu').hidden = true;
   panel(`<div class="eyebrow">Controls</div><h2>How to play</h2>
-    <div class="keys"><kbd>W A S D</kbd><span>Walk, or drive when in a vehicle</span><kbd>Shift</kbd><span>Sprint</span><kbd>Mouse</kbd><span>Aim. Click (or hold) to shoot</span><kbd>E</kbd><span>Get in / out of a vehicle</span><kbd>Space</kbd><span>Handbrake in a vehicle, dodge roll on foot, or continue a dialogue</span><kbd>Ctrl</kbd><span>Dodge roll (brief invulnerability)</span><kbd>Q</kbd><span>Take cover next to a wall, crate or car. Hold right mouse to peek</span><kbd>F / V</kbd><span>Light / heavy melee</span><kbd>E</kbd><span>Interact: vehicles, takedown from behind, climb, zipline, revive, defuse, turret</span><kbd>C</kbd><span>Crouch (quieter, harder to spot)</span><kbd>B</kbd><span>Carry a body / drop it in a dumpster</span><kbd>G</kbd><span>Ally command: coordinated takedown or focus fire</span><kbd>T</kbd><span>Place a barricade (defense missions)</span><kbd>1 2 3</kbd><span>Pistol, rifle (after Chapter 2), pipe</span><kbd>1 2 3</kbd><span>Pick a card on a decision screen</span><kbd>J</kbd><span>Codex: every game theory concept you’ve met</span><kbd>Esc</kbd><span>Pause, trust meters, save</span><kbd>\`</kbd><span>Examiner demo mode: jump chapters, swap AI strategies, run the solver</span></div>
+    <div class="keys"><kbd>W A S D</kbd><span>Walk, or drive when in a vehicle</span><kbd>Shift</kbd><span>Sprint</span><kbd>Mouse</kbd><span>Aim. Click (or hold) to shoot</span><kbd>E</kbd><span>Get in / out of a vehicle</span><kbd>Space</kbd><span>Handbrake in a vehicle, dodge roll on foot, or continue a dialogue</span><kbd>Ctrl</kbd><span>Dodge roll (brief invulnerability)</span><kbd>Q</kbd><span>Take cover next to a wall, crate or car. Hold right mouse to peek</span><kbd>F / V</kbd><span>Light / heavy melee</span><kbd>E</kbd><span>Interact: vehicles, takedown from behind, climb, zipline, revive, defuse, turret</span><kbd>C</kbd><span>Crouch (quieter, harder to spot)</span><kbd>B</kbd><span>Carry a body / drop it in a dumpster</span><kbd>G</kbd><span>Ally command: coordinated takedown or focus fire</span><kbd>T</kbd><span>Place a barricade (defense missions)</span><kbd>1 2 3</kbd><span>Pistol, rifle (after Chapter 2), pipe</span><kbd>1 2 3</kbd><span>Pick a card on a decision screen</span><kbd>H</kbd><span>Story briefing: who is who, your goal, and the next big choice</span><kbd>J</kbd><span>Codex: every game theory concept you’ve met</span><kbd>Esc</kbd><span>Pause, trust meters, save</span><kbd>\`</kbd><span>Examiner demo mode: jump chapters, swap AI strategies, run the solver</span></div>
     <p>Follow the amber arrow and the objective at the top right. Your choices change each colony’s trust (bottom right). Colonies at 3+ hostility stars send guards after you in their district.</p>`, 'Back', () => { $('menu').hidden = false; });
 };
 

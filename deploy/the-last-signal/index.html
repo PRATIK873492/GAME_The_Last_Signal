@@ -108,6 +108,11 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .tag.pareto{background:var(--pareto);color:#17123a}
 .tag.you{background:var(--signal);color:#1a1206}
 .tag.risk{background:#ffffff22;color:var(--text)}
+.brief{display:grid;gap:12px}
+.brief .bk{display:block;font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--signal);margin-bottom:3px}
+.brief b,.plain b{color:var(--text)}
+.plain{border-left:3px solid var(--signal);padding-left:10px;font-size:16px}
+details.more{display:grid;gap:8px}details.more summary{cursor:pointer;font:600 12px var(--mono);color:var(--mute)}details.more p{margin:6px 0}
 .facts{display:grid;gap:4px;font:12.5px var(--mono);color:var(--mute)}
 .facts b{color:var(--text);font-weight:600}
 .legend{display:flex;gap:12px;flex-wrap:wrap;font:11px var(--mono);color:var(--mute)}
@@ -266,16 +271,16 @@ body.mode3d #crosshair{left:50%!important;top:50%!important}
   window.GAME_3D = !/[?&]2d/.test(location.search);
   if (!window.GAME_3D) document.getElementById('view3d').remove();
 </script>
-<script src="gametheory.js"></script>
-<script src="characters.js"></script>
-<script src="game.js"></script>
-<script src="action.js"></script>
-<script src="missions.js"></script>
-<script src="chapter1.js"></script>
-<script src="chapter2.js"></script>
-<script src="chapter3.js"></script>
-<script src="chapter4.js"></script>
-<script src="chapter5.js"></script>
-<script src="chapter6.js"></script>
-<script src="chapter7.js"></script>
-<script type="module">if (window.GAME_3D) import('./engine/engine.js').catch(e => { console.error(e); alert('3D engine failed to load: ' + e.message + '. Open with ?2d for the classic view.'); });</script>
+<script src="gametheory.js?v=16"></script>
+<script src="characters.js?v=16"></script>
+<script src="game.js?v=16"></script>
+<script src="action.js?v=16"></script>
+<script src="missions.js?v=16"></script>
+<script src="chapter1.js?v=16"></script>
+<script src="chapter2.js?v=16"></script>
+<script src="chapter3.js?v=16"></script>
+<script src="chapter4.js?v=16"></script>
+<script src="chapter5.js?v=16"></script>
+<script src="chapter6.js?v=16"></script>
+<script src="chapter7.js?v=16"></script>
+<script type="module">if (window.GAME_3D) import('./engine/engine.js?v=' + Date.now()).catch(e => { console.error(e); alert('3D engine failed to load: ' + e.message + '. Open with ?2d for the classic view.'); });</script>

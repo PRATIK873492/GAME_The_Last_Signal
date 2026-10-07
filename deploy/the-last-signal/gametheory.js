@@ -197,7 +197,7 @@
   // 5.6  TRAGEDY OF THE COMMONS parameters
   // 5.7  PUBLIC GOODS parameters
   // -------------------------------------------------------------------
-  const COMMONS = { start: 100, regen: 15, amounts: { low: 5, medium: 10, high: 20 }, deathPenalty: 50 };
+  const COMMONS = { start: 100, regen: 15, amounts: { low: 3, medium: 10, high: 20 }, deathPenalty: 50 };
   const PUBLIC = { endowment: 100, threshold: 280, gridBenefit: 150 };
 
   // -------------------------------------------------------------------

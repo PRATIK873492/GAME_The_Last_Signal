@@ -14,7 +14,7 @@
      Decision "The Council"   : the four leaders meet under the bridge.
                                 Tension depends on trust; Elena confronts Veer
                                 if he diluted her water in Chapter 1. Then 4
-                                days of extraction (Low 5 / Medium 10 /
+                                days of extraction (Low 3 / Medium 10 /
                                 High 20) against +15 regeneration, using the
                                 existing commonsDay() engine. The river's
                                 colour follows its health in 3D; if it dies
@@ -164,7 +164,7 @@
           else if (trustOf('ironside') >= 60) lines.push(['Rhea "Iron" Dutta', 'Helix is poisoning our water. Veer blew their station. Let’s not waste what’s left.']);
           lines.push(['Silas Crow', 'Charming. So: the river gives back fifteen a day. We take what we take. What could go wrong?'],
                      ['Veer', 'Everything, if we all take a little more. Four days. Everyone chooses how much to pump: low, medium or high.'],
-                     ['Tip', 'TRAGEDY OF THE COMMONS: river health 100, +15 per day. Each colony pumps Low (5), Medium (10) or High (20), and keeps what it takes. If the river hits 0 it dies: every colony loses 50 and the riverbed dries for the rest of the game. The others choose by their strategy and their trust in you.', 'sys']);
+                     ['Tip', 'TRAGEDY OF THE COMMONS: river health 100, +15 per day. Each colony pumps Low (3), Medium (10) or High (20), and keeps what it takes. If all four pick Low (12 a day), the river heals. If the river hits 0 it dies: every colony loses 50 and the riverbed dries for the rest of the game. The others choose by their strategy and their trust in you.', 'sys']);
           dialog(lines, next);
         } },
       ] },

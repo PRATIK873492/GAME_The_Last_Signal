@@ -115,12 +115,12 @@ class WetSSREffect extends Effect {
 const lum = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 const GRADES = {
   // warm, slightly desaturated daylight (the blackout look)
-  day: (r, g, b) => { const l = lum(r, g, b), s = 0.82; return [(l + (r - l) * s) * 1.03 + 0.01, (l + (g - l) * s) * 1.0 + 0.005, (l + (b - l) * s) * 0.93]; },
+  day: (r, g, b) => { const l = lum(r, g, b), s = 1.0; return [(l + (r - l) * s) * 1.03 + 0.01, (l + (g - l) * s) * 1.0 + 0.005, (l + (b - l) * s) * 0.93]; },
   // golden hour: push oranges, lift shadows warm
   golden: (r, g, b) => [r * 1.08 + 0.02, g * 0.98 + 0.01, b * 0.82],
   // cold blue night: shadows toward blue, muted colour
   // (shadows are lifted with a gamma curve so characters and streets stay readable, not black silhouettes)
-  night: (r, g, b) => { const l = lum(r, g, b), s = 0.78, lift = v => Math.pow(Math.max(0, v), 0.72) * 0.94 + 0.025; return [lift((l + (r - l) * s) * 0.92), lift((l + (g - l) * s) * 0.98), lift((l + (b - l) * s) * 1.1)]; },
+  night: (r, g, b) => { const l = lum(r, g, b), s = 0.9, lift = v => Math.pow(Math.max(0, v), 0.72) * 0.94 + 0.025; return [lift((l + (r - l) * s) * 0.92), lift((l + (g - l) * s) * 0.98), lift((l + (b - l) * s) * 1.1)]; },
   // "Dawn" ending: bright, warm, saturated - the city lives again
   dawn: (r, g, b) => { const l = lum(r, g, b), s = 1.18; return [(l + (r - l) * s) * 1.1 + 0.03, (l + (g - l) * s) * 1.04 + 0.02, (l + (b - l) * s) * 0.9]; },
 };
@@ -156,7 +156,7 @@ export function createPost({ renderer, scene, bg, camera, bgCamera, preset }) {
   const sunDisc = new THREE.Mesh(new THREE.CircleGeometry(1, 32), new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 5, 3.6), transparent: true, depthWrite: false, fog: false }));
   sunDisc.frustumCulled = false; scene.add(sunDisc);
   const godrays = new GodRaysEffect(camera, sunDisc, { samples: 50, density: 0.95, decay: 0.93, weight: 0.45, exposure: 0.5, clampMax: 1, resolutionScale: 0.5, kernelSize: KernelSize.SMALL, blur: true });
-  const bloom = new BloomEffect({ mipmapBlur: true, luminanceThreshold: 1.0, luminanceSmoothing: 0.3, intensity: 0.85, radius: 0.7 });
+  const bloom = new BloomEffect({ mipmapBlur: true, luminanceThreshold: 1.0, luminanceSmoothing: 0.3, intensity: 1.0, radius: 0.75 });
   const tone = new ExposureToneEffect();
   const lut = LookupTexture.createNeutral(32);
   const lutEffect = new LUT3DEffect(lut);
@@ -164,7 +164,7 @@ export function createPost({ renderer, scene, bg, camera, bgCamera, preset }) {
 
   // 7. lens: chromatic aberration + vignette
   const ca = new ChromaticAberrationEffect({ offset: new THREE.Vector2(0.0006, 0.0006), radialModulation: true, modulationOffset: 0.3 });
-  const vignette = new VignetteEffect({ offset: 0.3, darkness: 0.55 });
+  const vignette = new VignetteEffect({ offset: 0.35, darkness: 0.45 });
   passes.lens = new EffectPass(camera, ca, vignette); composer.addPass(passes.lens);
 
   // 8. anti-aliasing + film grain
@@ -197,7 +197,7 @@ export function createPost({ renderer, scene, bg, camera, bgCamera, preset }) {
       const i = (r + g * n + b * n * n) * 4, R = r * s, G = g * s, B = b * s;
       let o0 = 0, o1 = 0, o2 = 0;
       for (const k in w) { if (!w[k]) continue; const o = GRADES[k](R, G, B); o0 += o[0] * w[k]; o1 += o[1] * w[k]; o2 += o[2] * w[k]; }
-      const c = 1.06;                                        // a little extra contrast everywhere
+      const c = 1.12;                                        // a little extra contrast everywhere
       d[i] = contrast(o0, c); d[i + 1] = contrast(o1, c); d[i + 2] = contrast(o2, c); d[i + 3] = 1;
     }
     lut.needsUpdate = true;
@@ -239,17 +239,17 @@ export function createPost({ renderer, scene, bg, camera, bgCamera, preset }) {
       ssr.uniforms.get('upView').value.set(0, 1, 0).transformDirection(camera.matrixWorldInverse);
       passes.ssr.enabled = settings.ssr && preset.ssr && env.wet > 0.02;
 
-      // --- depth of field: focus on what you aim at, or the cutscene subject ---
-      dofBlend += ((settings.dof && (env.aiming || env.cinematic) ? 1 : 0) - dofBlend) * Math.min(1, dt * 6);
+      // --- depth of field: only while aiming. Cutscenes stay sharp so the player can read the scene ---
+      dofBlend += ((settings.dof && env.aiming && !env.cinematic ? 1 : 0) - dofBlend) * Math.min(1, dt * 6);
       passes.dof.enabled = dofBlend > 0.02;
       dof.cocMaterial.focusDistance = env.focusDist;          // metres, in front of the camera
-      dof.cocMaterial.focusRange = env.aiming ? 6 : 10;        // metres that stay sharp
-      dof.bokehScale = (env.cinematic ? 1.6 : 3) * dofBlend;             // gentle in cutscenes, stronger when aiming
+      dof.cocMaterial.focusRange = env.aiming ? 6 : 40;        // metres that stay sharp
+      dof.bokehScale = (env.cinematic ? 0.5 : 2.2) * dofBlend;             // barely-there in cutscenes, so you can see the scene; stronger when aiming
 
       // --- motion blur from camera speed (vehicles later; sprinting barely registers) ---
       curVP.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
       const speed = camera.position.distanceTo(lastCam) / Math.max(dt, 1e-4); lastCam.copy(camera.position);
-      const mb = settings.motion ? THREE.MathUtils.clamp((speed - 7) / 15, 0, 1) : 0;
+      const mb = settings.motion && !env.cinematic ? THREE.MathUtils.clamp((speed - 7) / 15, 0, 1) : 0;
       passes.motion.enabled = mb > 0.01;
       motion.uniforms.get('intensity').value = mb * 0.6;
       motion.uniforms.get('invViewProj').value.copy(curVP).invert();

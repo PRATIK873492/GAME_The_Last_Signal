@@ -42,7 +42,29 @@ const archMat = new THREE.MeshStandardMaterial({ color: '#0d0d0e', roughness: 0.
 
 const paintCache = new Map();
 function paintFor(color) {
-  if (!paintCache.has(color)) paintCache.set(color, new THREE.MeshPhysicalMaterial({ color, metalness: 0.55, roughness: 0.42, clearcoat: 0.8, clearcoatRoughness: 0.25 }));   // dusty clear-coat
+  if (!paintCache.has(color)) {
+    const m = new THREE.MeshPhysicalMaterial({ color, metalness: 0.55, roughness: 0.42, clearcoat: 0.8, clearcoatRoughness: 0.25 });   // dusty clear-coat
+    // Survival wear: road dust builds up from the sills, plus fine scratches that break up the clear coat.
+    m.onBeforeCompile = sh => {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vVehP;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvVehP = transformed;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+          varying vec3 vVehP;
+          float vH(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 15731.743); }
+          float vN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+            return mix(mix(vH(i), vH(i + vec2(1, 0)), f.x), mix(vH(i + vec2(0, 1)), vH(i + vec2(1, 1)), f.x), f.y); }`)
+        .replace('#include <color_fragment>', `#include <color_fragment>
+          float vDust = smoothstep(1.0, 0.25, vVehP.y + vN(vVehP.xz * 3.0) * 0.35);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.37, 0.3), vDust * 0.75);
+          float vScr = step(0.985, vN(vec2(vVehP.x * 40.0 + vVehP.z * 3.0, vVehP.y * 2.0)));
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.55), vScr * 0.5);`)
+        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+          roughnessFactor = mix(roughnessFactor, 0.95, vDust);`)
+        .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+          material.clearcoat *= 1.0 - vDust;`);
+    };
+    paintCache.set(color, m);
+  }
   return paintCache.get(color);
 }
 

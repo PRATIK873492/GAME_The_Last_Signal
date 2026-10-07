@@ -29,6 +29,11 @@ import { buildVehicle, wreckVehicle } from './vehicles.js';
 const W = (x, y, h = 0) => new THREE.Vector3(x * S, h, y * S);         // map px -> world metres
 const heading = a => Math.PI / 2 - a;                                   // 2D angle -> Y rotation of a +z-facing model
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
+const wrapPI = a => ((a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+/** Damp an angle along the short way round. */
+const dampAngle = (a, b, k, dt) => a + wrapPI(b - a) * (1 - Math.exp(-k * dt));
+// Presentation-only motion state (the 2D simulation is untouched): smoothed yaw, lean, suspension.
+const motion = new WeakMap();
 
 // ---------------------------------------------------------------------
 // Scene set-up (the same world systems as the Phase 1-4 3D preview)
@@ -136,6 +141,10 @@ function updateCamera(dt) {
   cam.bobT = (cam.bobT || 0) + dt * pSpd * 1.9;
   const bob = player.car ? 0 : Math.min(1, pSpd / 6) * 0.045;
   camera.position.y += Math.abs(Math.sin(cam.bobT)) * bob; camera.position.addScaledVector(right, Math.sin(cam.bobT * 0.5) * bob * 0.6);
+  // handheld feel: two slow incommensurate sines on pitch / roll, damped right down when aiming
+  const tt = performance.now() / 1000, hh = (1 - cam.aimZoom * 0.85) * (player.car ? 0.4 : 1);
+  camera.rotateX((Math.sin(tt * 0.9) * 0.6 + Math.sin(tt * 2.3 + 1.7) * 0.4) * 0.0035 * hh);
+  camera.rotateZ((Math.sin(tt * 0.7 + 0.4) * 0.6 + Math.sin(tt * 1.9) * 0.4) * 0.0028 * hh);
   const fov = rightDown && !player.car ? 46 : player.car ? 68 + Math.min(10, Math.abs(player.car.v || 0) * 0.02) : 62 + sprint * 8;
   if (Math.abs(camera.fov - fov) > 0.1) { camera.fov = damp(camera.fov, fov, 10, dt); camera.updateProjectionMatrix(); }
 }
@@ -182,7 +191,18 @@ function drawPerson(e, cfg, st, pos) {
   used.add(e);
   r.root.visible = true;
   r.root.position.copy(pos || entPos(e));
-  r.root.rotation.y = heading(e.a || 0);
+  // Weight and inertia: the body turns toward the sim heading over a few frames instead of snapping,
+  // leans into turns in proportion to speed x turn rate, and tips forward when speeding up.
+  const dt = Math.min(0.05, st.dt || 0.016), want = heading(e.a || 0);
+  let m = motion.get(e);
+  if (!m) { m = { yaw: want, lean: 0, tilt: 0, spd: st.speed || 0 }; motion.set(e, m); r.root.rotation.order = 'YXZ'; }
+  const prevYaw = m.yaw;
+  m.yaw = st.dead || st.mounted ? want : dampAngle(m.yaw, want, st.aiming ? 22 : 11, dt);   // aiming stays crisp
+  const turnRate = wrapPI(m.yaw - prevYaw) / dt, spd = st.speed || 0, acc = (spd - m.spd) / dt; m.spd = spd;
+  const moving = !st.dead && !st.mounted && !st.roll;
+  m.lean = damp(m.lean, moving ? THREE.MathUtils.clamp(-turnRate * spd * 0.018, -0.22, 0.22) : 0, 8, dt);
+  m.tilt = damp(m.tilt, moving ? THREE.MathUtils.clamp(acc * 0.012 + spd * 0.012, -0.08, 0.14) : 0, 6, dt);
+  r.root.rotation.y = m.yaw; r.root.rotation.z = m.lean; r.root.rotation.x = m.tilt;
   poseRig(r, st);
 }
 const leaderList = [['elena', 'P.elena'], ['rhea', 'P.rhea'], ['silas', 'P.silas']];
@@ -225,7 +245,24 @@ function drawEntities(dt, camMap) {
     used.add(c);
     v.g.visible = true;
     const y = c.type === 'boat' ? (GT.riverDead ? -3 : WATER_Y) + Math.sin(performance.now() / 700 + c.x) * 0.06 : 0;
-    v.g.position.copy(W(c.x, c.y, y)); v.g.rotation.y = heading(c.a);
+    v.g.position.copy(W(c.x, c.y, y));
+    // Suspension: the body pitches back when accelerating and dives when braking, rolls outward in corners,
+    // and bounces a little at speed. Pure presentation: the 2D car still drives exactly the same.
+    {
+      let m = motion.get(c);
+      if (!m) { m = { v: c.v || 0, a: c.a, pitch: 0, roll: 0, ph: Math.random() * 9 }; motion.set(c, m); v.g.rotation.order = 'YXZ'; }
+      const sp = (c.v || 0) * S, acc = (sp - m.v) / Math.max(dt, 1e-3), yawRate = wrapPI(c.a - m.a) / Math.max(dt, 1e-3);
+      m.v = sp; m.a = c.a;
+      const bike = c.type === 'bike', boat = c.type === 'boat';
+      const k = c.hp <= 0 ? 0 : 1;
+      m.pitch = damp(m.pitch, k * THREE.MathUtils.clamp(-acc * 0.004, -0.06, 0.06), 5, dt);
+      // cars roll OUT of the turn; bikes lean INTO it, much harder
+      m.roll = damp(m.roll, k * THREE.MathUtils.clamp(yawRate * sp * (bike ? -0.06 : 0.012), bike ? -0.5 : -0.07, bike ? 0.5 : 0.07), bike ? 6 : 4, dt);
+      m.ph += dt * Math.abs(sp) * 0.9;
+      const bounce = boat ? 0 : Math.sin(m.ph) * Math.min(1, Math.abs(sp) / 20) * 0.012;
+      v.g.rotation.y = heading(c.a); v.g.rotation.x = m.pitch + (boat ? Math.sin(performance.now() / 900 + c.x) * 0.03 : 0); v.g.rotation.z = m.roll;
+      v.g.position.y += bounce + Math.abs(m.roll) * 0.05;
+    }
     if (c.jump > 0) { v.g.position.y += Math.sin(Math.min(1, c.jump) * Math.PI) * 2; c.jump = Math.max(0, c.jump - dt); }
     v.spin += (c.v || 0) * S * dt * 2; for (const w of v.wheels) w.rotation.x = v.spin;
     if (c.hp <= 0) wreckVehicle(v);

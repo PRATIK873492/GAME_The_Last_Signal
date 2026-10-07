@@ -166,7 +166,7 @@ export function createLighting({ scene, bg, renderer, camera, preset }) {
     hemi.intensity = 0.65 + 0.3 * day; bgHemi.intensity = hemi.intensity * 0.9;   // strong ambient floor at night
     hemi.color.setRGB(0.6 + 0.15 * day, 0.68 + 0.12 * day, 0.85); hemi.groundColor.setRGB(0.3 - 0.07 * day, 0.26 - 0.05 * day, 0.24 - 0.08 * day);
     // night gets a little more exposure (like eyes adapting) so streets stay readable
-    renderer.toneMappingExposure = 0.62 + (1 - day) * 0.4 + oc * 0.08;
+    renderer.toneMappingExposure = 0.55 + (1 - day) * 0.47 + oc * 0.08;
 
     // fog colour: haze by day, orange at sunset, deep blue at night, then the weather tint
     const fog = scene.fog.color;

@@ -81,7 +81,11 @@ export function facadeMaterial() {
         #endif
         vLsPos = (modelMatrix * lsW).xyz; vLsNrm = normalize(lsN);`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vLsPos; varying vec3 vLsNrm; uniform float uWet;')
+      .replace('#include <common>', `#include <common>
+        varying vec3 vLsPos; varying vec3 vLsNrm; uniform float uWet;
+        float fHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float fNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(fHash(i), fHash(i + vec2(1, 0)), f.x), mix(fHash(i + vec2(0, 1)), fHash(i + vec2(1, 1)), f.x), f.y); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         float lsWin = 0.0;
         diffuseColor.rgb *= mix(1.0, 0.72, uWet);                        // rain-soaked walls go darker
@@ -99,6 +103,27 @@ export function facadeMaterial() {
           diffuseColor.rgb *= 1.0 - 0.2 * step(fract(fy / 3.4), 0.07); // floor slab lines
           diffuseColor.rgb *= mix(0.55, 1.0, clamp(fy / 5.0, 0.0, 1.0)); // grime near the street
           diffuseColor.rgb *= 0.9 + 0.1 * h;                            // per-window variation
+          // ---- 18 months of weather ----
+          // rain streaks: noise stretched vertically, strongest under each window sill
+          float streak = fNoise(vec2(u * 2.3, fy * 0.08)) * fNoise(vec2(u * 7.0, fy * 0.25));
+          float underSill = smoothstep(0.28, 0.0, cell.y) * step(0.2, cell.x) * step(cell.x, 0.8);
+          diffuseColor.rgb *= 1.0 - (1.0 - lsWin) * (0.28 * streak + 0.18 * underSill * h);
+          // large water stains and patchy repairs
+          float patchN = fNoise(vec2(u, fy) * 0.18);
+          diffuseColor.rgb *= mix(1.0, 0.82, smoothstep(0.55, 0.75, patchN) * (1.0 - lsWin));
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.05, 1.0, 0.92), smoothstep(0.2, 0.05, patchN));
+          // shattered panes: a jagged dark hole with a faint bright cracked edge
+          float broken = step(0.82, fract(h * 7.31)) * lsWin;
+          float shard = fNoise(cell * vec2(9.0, 7.0) + h * 40.0);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.008), broken * step(0.45, shard));
+          diffuseColor.rgb += broken * smoothstep(0.42, 0.45, shard) * (1.0 - step(0.45, shard)) * 0.08;
+          // AC units under ~1 in 6 windows (a grey box + a rust drip below it)
+          float acOn = step(0.83, fract(h * 13.7)) * step(3.4, fy);
+          float ac = acOn * step(0.3, cell.x) * step(cell.x, 0.62) * step(0.12, cell.y) * step(cell.y, 0.26);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.32, 0.33, 0.33) * (0.7 + 0.3 * fNoise(cell * 30.0)), ac);
+          float drip = acOn * smoothstep(0.12, 0.0, cell.y) * step(0.42, cell.x) * step(cell.x, 0.5);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.75, 0.55, 0.4), drip * 0.6);
+          lsWin *= 1.0 - broken * step(0.45, shard);                    // holes are not shiny
         } else {
           diffuseColor.rgb *= 0.62;                                     // flat roofs are darker
         }`)

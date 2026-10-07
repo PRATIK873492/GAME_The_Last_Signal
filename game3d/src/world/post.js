@@ -115,7 +115,9 @@ class WetSSREffect extends Effect {
 const lum = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 const GRADES = {
   // warm, slightly desaturated daylight (the blackout look)
-  day: (r, g, b) => { const l = lum(r, g, b), s = 1.0; return [(l + (r - l) * s) * 1.03 + 0.01, (l + (g - l) * s) * 1.0 + 0.005, (l + (b - l) * s) * 0.93]; },
+  // blockbuster teal & orange: shadows pushed toward teal, highlights and skin toward warm orange
+  day: (r, g, b) => { const l = lum(r, g, b), s = 1.05, hi = Math.min(1, Math.max(0, (l - 0.35) / 0.5)), lo = 1 - hi;
+    return [(l + (r - l) * s) * (1.0 + 0.06 * hi) - 0.02 * lo + 0.01, (l + (g - l) * s) * (1.0 + 0.015 * hi) + 0.01 * lo, (l + (b - l) * s) * (0.9 + 0.02 * lo) + 0.035 * lo]; },
   // golden hour: push oranges, lift shadows warm
   golden: (r, g, b) => [r * 1.08 + 0.02, g * 0.98 + 0.01, b * 0.82],
   // cold blue night: shadows toward blue, muted colour
@@ -248,8 +250,9 @@ export function createPost({ renderer, scene, bg, camera, bgCamera, preset }) {
 
       // --- motion blur from camera speed (vehicles later; sprinting barely registers) ---
       curVP.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-      const speed = camera.position.distanceTo(lastCam) / Math.max(dt, 1e-4); lastCam.copy(camera.position);
-      const mb = settings.motion && !env.cinematic ? THREE.MathUtils.clamp((speed - 7) / 15, 0, 1) : 0;
+      const jump = camera.position.distanceTo(lastCam), speed = jump / Math.max(dt, 1e-4); lastCam.copy(camera.position);
+      const teleported = jump > 3;                              // checkpoint / respawn: never smear a cut
+      const mb = settings.motion && !env.cinematic && !teleported ? THREE.MathUtils.clamp((speed - 7) / 15, 0, 1) : 0;
       passes.motion.enabled = mb > 0.01;
       motion.uniforms.get('intensity').value = mb * 0.6;
       motion.uniforms.get('invViewProj').value.copy(curVP).invert();
